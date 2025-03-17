@@ -1,0 +1,1 @@
+export type TimeFilter = 'Today' | 'Yesterday' | 'This wk.' | 'Last wk.' | 'This mo.' | 'Last mo.' | 'Last 3 mo.' | 'This yr.' | 'Last yr.' | 'Reset'; 

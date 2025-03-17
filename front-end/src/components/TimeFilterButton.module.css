@@ -1,0 +1,27 @@
+.button {
+  width: 5rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  color: #D1D5DB;
+  background-color: #1E2024;
+  border: 1px solid #374151;
+  border-radius: 9999px;
+  transition-property: background-color;
+  transition-duration: 200ms;
+}
+
+.button:hover {
+  background-color: #1F2937;
+}
+
+.buttonGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 0.5rem;
+}
