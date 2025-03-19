@@ -49,18 +49,18 @@ export function AccountSelector({
                 <span className="font-medium text-gray-300 group-hover:text-white transition-colors truncate max-w-[150px]">
                   {selectedAccount.name}
                 </span>
-                <button
+                <div
                   onClick={(e) => {
                     e.stopPropagation();
                     onEditAccount();
                   }}
-                  className="ml-2 p-1 rounded-full opacity-0 group-hover:opacity-100 hover:bg-[#363940] transition-all duration-200 shrink-0"
+                  className="ml-2 p-1 rounded-full opacity-100 hover:bg-[#363940] transition-all duration-200 shrink-0 cursor-pointer"
                 >
                   <RiPencilLine 
                     className="text-gray-400 hover:text-white transition-colors" 
                     size={14}
                   />
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -145,4 +145,4 @@ export function AccountSelector({
       )}
     </div>
   );
-} 
+}

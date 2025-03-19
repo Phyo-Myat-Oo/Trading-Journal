@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Account, Transaction } from '../../types/account';
-import { AccountDetails } from '../account/AccountDetails';
+import { Transaction } from '../../types/account';
+import { AccountDetails } from '../accounts/AccountDetails';
 import { RiCloseLine } from 'react-icons/ri';
 
 interface AccountDialogProps {
@@ -15,7 +15,7 @@ interface AccountDialogProps {
     cashBalance: number;
     activeBalance: number;
   };
-  onSave: (data: { name: string; cashBalance: number; activeBalance: number; isPrimary: boolean }) => void;
+  onSave: (data: { name: string; cashBalance: number; activeBalance: number; isPrimary: boolean; transactions: Transaction[] }) => void;
   onDelete: () => void;
   canDelete: boolean;
   currentBalance: number;
@@ -97,7 +97,10 @@ export function AccountDialog({ isOpen, onClose, account, onSave, onDelete, canD
   };
 
   const handleSave = () => {
-    onSave(formData);
+    onSave({
+      ...formData,
+      transactions
+    });
     onClose();
   };
 

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { TimeFilter } from '../types/filters';
 import { Trade } from '../types/trade';
-import { PerformanceChart } from '../components/PerformanceChart';
+import { PerformanceChart } from '../components/charts/PerformanceChart';
 import { AccountDialog } from '../components/dialogs/AccountDialog';
+import { Transaction } from '../types/account';
 
 export function Dashboard() {
   const [selectedTimeFilter] = useState<TimeFilter>('This yr.');
@@ -71,7 +72,13 @@ export function Dashboard() {
     ? Math.abs(losses.reduce((acc, t) => acc + t.return, 0) / losses.length)
     : 0;
 
-  const handleAccountSave = (data: { name: string; initialBalance: number }) => {
+  const handleAccountSave = (data: { 
+    name: string; 
+    cashBalance: number; 
+    activeBalance: number; 
+    isPrimary: boolean;
+    transactions: Transaction[];
+  }) => {
     // Handle saving account data
     console.log('Saving account:', data);
     setIsAccountDialogOpen(false);
@@ -257,6 +264,8 @@ export function Dashboard() {
         isOpen={isAccountDialogOpen}
         onClose={() => setIsAccountDialogOpen(false)}
         onSave={handleAccountSave}
+        onDelete={() => console.log('Delete account')}
+        canDelete={false}
         currentBalance={10000}
       />
     </div>

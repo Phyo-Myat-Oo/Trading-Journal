@@ -10,10 +10,10 @@ import {
   RiAddLine,
   RiPieChartLine
 } from 'react-icons/ri';
-import { AccountDialog } from './dialogs/AccountDialog';
+import { AccountDialog } from '../dialogs/AccountDialog';
 import { NavItem } from './NavItem';
-import { ActionButton } from './ActionButton';
-import { AccountSelector } from './account/AccountSelector';
+import { ActionButton } from '../common/ActionButton';
+import { AccountSelector } from '../accounts/AccountSelector';
 
 interface Account {
   id: string;
@@ -48,6 +48,7 @@ export function Sidebar({ isMobile }: SidebarProps) {
     cashBalance: number; 
     activeBalance: number; 
     isPrimary: boolean;
+    transactions: any[];
   }) => {
     if (isNewAccount) {
       // Create new account
@@ -57,7 +58,7 @@ export function Sidebar({ isMobile }: SidebarProps) {
         isPrimary: data.isPrimary,
         cashBalance: data.cashBalance,
         activeBalance: data.activeBalance,
-        transactions: [],
+        transactions: data.transactions || []
       };
       
       // If the new account is primary, remove primary from other accounts
@@ -76,17 +77,19 @@ export function Sidebar({ isMobile }: SidebarProps) {
         cashBalance: data.cashBalance,
         activeBalance: data.activeBalance,
         isPrimary: data.isPrimary,
+        transactions: data.transactions // Always use the transactions from the dialog
       };
 
       // If this account is being set as primary, remove primary from other accounts
-      const updatedAccounts = data.isPrimary 
-        ? accounts.map(acc => ({
-            ...acc,
-            isPrimary: acc.id === selectedAccount.id ? true : false
-          }))
-        : accounts.map(acc => 
-            acc.id === selectedAccount.id ? updatedAccount : acc
-          );
+      const updatedAccounts = accounts.map(acc => {
+        if (acc.id === selectedAccount.id) {
+          return updatedAccount; // Always use the full updated account
+        } else if (data.isPrimary) {
+          return { ...acc, isPrimary: false }; // Remove primary from other accounts
+        } else {
+          return acc; // Leave other accounts unchanged
+        }
+      });
 
       setAccounts(updatedAccounts);
       setSelectedAccount(updatedAccount);

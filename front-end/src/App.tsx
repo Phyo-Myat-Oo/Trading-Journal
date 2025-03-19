@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ToastProvider } from './providers/ToastProvider';
-import { Layout } from './components/Layout';
+import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import Stats from './pages/Stats';
 import Calendar from './pages/Calendar';
@@ -9,6 +9,7 @@ import Trades from './pages/Trades';
 import Journal from './pages/Journal';
 import Help from './pages/Help';
 import { Settings } from './pages/Settings';
+
 import './styles/dateSlider.css';
 
 const queryClient = new QueryClient({
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="calendar" element={<Calendar />} />
               <Route path="settings" element={<Settings />} />
               <Route path="help" element={<Help />} />
+         
             </Route>
           </Routes>
         </BrowserRouter>
