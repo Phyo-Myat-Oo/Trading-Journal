@@ -4,60 +4,52 @@ export type TradeOutcome = 'WIN' | 'LOSS' | 'BE';
 
 export interface Trade {
   id: string;
+  accountId: string;
+  market: 'STOCK' | 'OPTION' | 'CRYPTO' | 'FOREX';
   symbol: string;
-  direction: TradeDirection;
-  status: TradeStatus;
-  outcome?: TradeOutcome;
-  entry: {
+  side: 'LONG' | 'SHORT';
+  status: 'OPEN' | 'CLOSED';
+  entries: {
+    datetime: string;
     price: number;
-    date: string;
     quantity: number;
-  };
-  exit?: {
-    price: number;
-    date: string;
-    quantity: number;
-  };
+    fee: number;
+    action: 'BUY' | 'SELL';
+  }[];
+  target: number;
   stopLoss: number;
-  takeProfit: number;
-  fees: number;
-  pnl?: {
-    gross: number;
-    net: number;
-    riskRewardRatio?: number;
-  };
-  setupId?: string;
   notes: string;
-  images?: string[];
   tags: string[];
+  screenshots: string[];
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TradeSetup {
   id: string;
-  name: string;
-  description: string;
-  rules: string[];
+  market: 'STOCK' | 'OPTION' | 'CRYPTO' | 'FOREX';
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  entry: number;
+  target: number;
+  stopLoss: number;
+  note: string;
   tags: string[];
-  metrics?: {
-    totalTrades: number;
-    winRate: number;
-    averageRR: number;
-    profitFactor: number;
-    expectancy: number;
-  };
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DayNote {
   id: string;
   date: string;
-  marketCondition: string;
-  bias: string;
+  mood: 'GOOD' | 'NEUTRAL' | 'BAD';
+  marketCondition: 'TRENDING' | 'CHOPPY' | 'RANGING';
+  marketVolatility: 'LOW' | 'MEDIUM' | 'HIGH';
+  summary: string;
   notes: string;
-  keyLevels?: {
-    price: number;
-    description: string;
-  }[];
-  images?: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TradeStatistics {

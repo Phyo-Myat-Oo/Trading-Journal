@@ -1,12 +1,37 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { RiCloseLine } from 'react-icons/ri';
+import { 
+  MdTrendingUp,
+  MdTrendingFlat,
+  MdTrendingDown,
+  MdSignalCellular1Bar,
+  MdSignalCellular2Bar,
+  MdSignalCellular4Bar,
+  MdMood,
+  MdSentimentNeutral,
+  MdMoodBad
+} from 'react-icons/md';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 
 interface DayNoteDialogProps {
+  isOpen: boolean;
   onClose: () => void;
-  onSave: (note: any) => void;
+  onSave: (note: DayNoteData) => void;
 }
 
-export const DayNoteDialog = ({ onClose, onSave }: DayNoteDialogProps) => {
-  const [note, setNote] = useState({
+interface DayNoteData {
+  date: string;
+  mood: 'GOOD' | 'NEUTRAL' | 'BAD';
+  marketCondition: 'TRENDING' | 'CHOPPY' | 'RANGING';
+  marketVolatility: 'LOW' | 'MEDIUM' | 'HIGH';
+  summary: string;
+  notes: string;
+}
+
+export function DayNoteDialog({ isOpen, onClose, onSave }: DayNoteDialogProps) {
+  const [formData, setFormData] = useState<DayNoteData>({
     date: new Date().toISOString().slice(0, 10),
     mood: 'NEUTRAL',
     marketCondition: 'CHOPPY',
@@ -16,199 +41,296 @@ export const DayNoteDialog = ({ onClose, onSave }: DayNoteDialogProps) => {
   });
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-      <div className="bg-gray-800 rounded-lg p-6 w-[600px]">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl text-gray-200">New Day Note</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-300">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <Transition appear show={isOpen} as={Fragment}>
+      <Dialog as="div" className="relative z-50" onClose={onClose}>
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-300"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-200"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="fixed inset-0 bg-black/80" />
+        </Transition.Child>
+
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-300"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-200"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-lg bg-[#1A1B23] rounded-lg shadow-xl overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-3 bg-[#1A1B23] border-b border-gray-800">
+                  <Dialog.Title className="text-[15px] text-gray-100">
+                    New Day Note
+                  </Dialog.Title>
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-gray-200 transition-colors"
+                    onClick={onClose}
+                  >
+                    <RiCloseLine className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-5 space-y-5">
+                  {/* Date and Summary */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-[13px] text-gray-400 mb-2">DATE</div>
+                      <input
+                        type="date"
+                        value={formData.date}
+                        onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                        className="w-full bg-[#25262C] text-[13px] text-gray-200 py-1.5 px-3 rounded focus:outline-none focus:ring-1 focus:ring-[#2196F3] [color-scheme:dark]"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <div className="text-[13px] text-gray-400 mb-2">SUMMARY</div>
+                      <input
+                        type="text"
+                        value={formData.summary}
+                        onChange={(e) => setFormData(prev => ({ ...prev, summary: e.target.value }))}
+                        className="w-full bg-[#25262C] text-[13px] text-gray-200 py-1.5 px-3 rounded focus:outline-none placeholder:text-gray-600"
+                        placeholder="Brief summary of the day..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mood, Market Condition, Market Volatility */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* Mood */}
+                    <div>
+                      <div className="text-[13px] text-gray-400 mb-2">MOOD</div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, mood: 'GOOD' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.mood === 'GOOD'
+                              ? 'bg-[#4CAF50] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdMood className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, mood: 'NEUTRAL' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.mood === 'NEUTRAL'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdSentimentNeutral className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, mood: 'BAD' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.mood === 'BAD'
+                              ? 'bg-[#EF5350] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdMoodBad className="w-5 h-5 mx-auto" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Market Condition */}
+                    <div>
+                      <div className="text-[13px] text-gray-400 mb-2">MKT CONDITION</div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketCondition: 'TRENDING' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketCondition === 'TRENDING'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdTrendingUp className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketCondition: 'CHOPPY' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketCondition === 'CHOPPY'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdTrendingFlat className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketCondition: 'RANGING' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketCondition === 'RANGING'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdTrendingDown className="w-5 h-5 mx-auto" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Market Volatility */}
+                    <div>
+                      <div className="text-[13px] text-gray-400 mb-2">MKT VOLATILITY</div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketVolatility: 'LOW' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketVolatility === 'LOW'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdSignalCellular1Bar className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketVolatility: 'MEDIUM' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketVolatility === 'MEDIUM'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdSignalCellular2Bar className="w-5 h-5 mx-auto" />
+                        </button>
+                        <button
+                          onClick={() => setFormData(prev => ({ ...prev, marketVolatility: 'HIGH' }))}
+                          className={`flex-1 p-2 rounded ${
+                            formData.marketVolatility === 'HIGH'
+                              ? 'bg-[#2196F3] text-white'
+                              : 'bg-[#25262C] text-gray-400'
+                          }`}
+                        >
+                          <MdSignalCellular4Bar className="w-5 h-5 mx-auto" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <div className="text-[13px] text-gray-400 mb-2">NOTES</div>
+                    <div className="bg-[#25262C] rounded-md overflow-hidden">
+                      <ReactQuill
+                        theme="snow"
+                        value={formData.notes}
+                        onChange={(content) => setFormData(prev => ({ ...prev, notes: content }))}
+                        className="h-[200px] notes-editor"
+                        modules={{
+                          toolbar: [
+                            ['bold', 'italic', 'underline'],
+                            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                            ['link', 'image']
+                          ]
+                        }}
+                        formats={[
+                          'bold', 'italic', 'underline',
+                          'list', 'bullet',
+                          'link', 'image'
+                        ]}
+                        placeholder="Detailed notes about market conditions, observations, lessons learned..."
+                      />
+                    </div>
+                    <style dangerouslySetInnerHTML={{ __html: `
+                      input[type="date"]::-webkit-calendar-picker-indicator {
+                        filter: invert(0.8) brightness(1.5) saturate(1);
+                        opacity: 0.8;
+                        cursor: pointer;
+                      }
+                      input[type="date"]::-webkit-calendar-picker-indicator:hover {
+                        opacity: 1;
+                      }
+                      .notes-editor {
+                        background: #25262C;
+                        border: none;
+                        color: #E5E7EB;
+                      }
+                      .notes-editor .ql-toolbar {
+                        background: #1D1F29;
+                        border: none;
+                        border-bottom: 1px solid #374151;
+                      }
+                      .notes-editor .ql-container {
+                        border: none;
+                        font-size: 14px;
+                        color: #E5E7EB;
+                      }
+                      .notes-editor .ql-editor {
+                        padding: 16px;
+                        min-height: 120px;
+                      }
+                      .notes-editor .ql-editor.ql-blank::before {
+                        color: #6B7280;
+                        font-style: normal;
+                        font-size: 14px;
+                      }
+                      .notes-editor .ql-stroke {
+                        stroke: #9CA3AF;
+                      }
+                      .notes-editor .ql-fill {
+                        fill: #9CA3AF;
+                      }
+                      .notes-editor .ql-picker {
+                        color: #9CA3AF;
+                      }
+                      .notes-editor .ql-picker-options {
+                        background: #25262C;
+                        border: 1px solid #374151;
+                      }
+                      .notes-editor .ql-toolbar button {
+                        padding: 4px 8px;
+                        margin: 4px;
+                        border-radius: 4px;
+                      }
+                      .notes-editor .ql-toolbar button:hover {
+                        background: #374151;
+                      }
+                      .notes-editor .ql-toolbar button.ql-active {
+                        background: #374151;
+                      }
+                      .notes-editor .ql-toolbar button.ql-active .ql-stroke {
+                        stroke: #E5E7EB;
+                      }
+                      .notes-editor .ql-toolbar button.ql-active .ql-fill {
+                        fill: #E5E7EB;
+                      }
+                      .notes-editor .ql-toolbar button:hover .ql-stroke {
+                        stroke: #E5E7EB;
+                      }
+                      .notes-editor .ql-toolbar button:hover .ql-fill {
+                        fill: #E5E7EB;
+                      }
+                    ` }} />
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex justify-end p-4 border-t border-gray-800 bg-[#1D1F29]">
+                  <button
+                    onClick={() => onSave(formData)}
+                    className="bg-[#2196F3] text-white px-5 py-2 rounded text-[14px] font-medium hover:bg-[#1E88E5] transition-colors"
+                  >
+                    Save Note
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
         </div>
-
-        <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-6">
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Mood</label>
-              <div className="flex space-x-2">
-                <button
-                  className={`p-2 rounded ${
-                    note.mood === 'GOOD' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, mood: 'GOOD' })}
-                >
-                  <span role="img" aria-label="happy">😊</span>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.mood === 'NEUTRAL' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, mood: 'NEUTRAL' })}
-                >
-                  <span role="img" aria-label="neutral">😐</span>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.mood === 'BAD' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, mood: 'BAD' })}
-                >
-                  <span role="img" aria-label="sad">😞</span>
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Mkt Condition</label>
-              <div className="flex space-x-2">
-                <button
-                  className={`p-2 rounded ${
-                    note.marketCondition === 'TRENDING' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketCondition: 'TRENDING' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
-                  </svg>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.marketCondition === 'CHOPPY' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketCondition: 'CHOPPY' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                  </svg>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.marketCondition === 'RANGING' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketCondition: 'RANGING' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Mkt Volatility</label>
-              <div className="flex space-x-2">
-                <button
-                  className={`p-2 rounded ${
-                    note.marketVolatility === 'LOW' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketVolatility: 'LOW' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 10h16" stroke="currentColor" strokeWidth="2"/>
-                  </svg>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.marketVolatility === 'MEDIUM' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketVolatility: 'MEDIUM' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 11h4l3-6 4 12 3-6h4"/>
-                  </svg>
-                </button>
-                <button
-                  className={`p-2 rounded ${
-                    note.marketVolatility === 'HIGH' ? 'bg-blue-500' : 'bg-gray-700'
-                  }`}
-                  onClick={() => setNote({ ...note, marketVolatility: 'HIGH' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 10l4-8 4 16 4-16 4 8"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Date</label>
-            <input
-              type="date"
-              value={note.date}
-              onChange={(e) => setNote({ ...note, date: e.target.value })}
-              className="bg-gray-700 text-gray-200 rounded px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Summary</label>
-            <input
-              type="text"
-              value={note.summary}
-              onChange={(e) => setNote({ ...note, summary: e.target.value })}
-              className="w-full bg-gray-700 text-gray-200 rounded px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Notes</label>
-            <div className="bg-gray-700 rounded-lg p-2">
-              <div className="flex space-x-2 mb-2">
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <span className="font-bold">B</span>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M4 5h16M4 10h16M4 15h16"/>
-                  </svg>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M4 5h16M4 10h10M4 15h16"/>
-                  </svg>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">H₁</button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M3 4h14M3 8h14M3 12h14M3 16h14"/>
-                  </svg>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M4 5h12M8 10h8M4 15h16"/>
-                  </svg>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                  </svg>
-                </button>
-                <button className="p-1 hover:bg-gray-600 rounded">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              </div>
-              <textarea
-                value={note.notes}
-                onChange={(e) => setNote({ ...note, notes: e.target.value })}
-                className="w-full h-32 bg-gray-700 text-gray-200 rounded resize-none focus:outline-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button
-            onClick={() => onSave(note)}
-            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+      </Dialog>
+    </Transition>
   );
-};
+}

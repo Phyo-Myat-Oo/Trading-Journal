@@ -20,7 +20,7 @@ export function Layout() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#13151A]">
+    <div className="h-screen flex flex-col bg-[#13151A]">
       {/* Desktop Sidebar */}
       <div className="hidden lg:block fixed top-0 left-0 h-full">
         <Sidebar isMobile={false} />
@@ -37,13 +37,13 @@ export function Layout() {
       )}
       
       {/* Header and Main Content */}
-      <div className={`${!isMobile ? 'lg:pl-64' : ''}`}>
+      <div className={`flex flex-col h-full min-h-0flex-1 ${!isMobile ? 'lg:pl-64' : ''}`}>
         <Header 
           onMenuClick={isMobile ? () => setSidebarCollapsed(!sidebarCollapsed) : undefined}
           isMobile={isMobile}
         />
-        <main className="p-3 sm:p-4 lg:p-6">
-          <div className="max-w-[1920px] mx-auto w-full">
+        <main className="flex-1 p-3 sm:p-4 lg:p-6 min-h-0">
+          <div className="h-full  max-w-[1920px] mx-auto w-full">
             <Outlet />
           </div>
         </main>

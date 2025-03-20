@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ToastProvider } from './providers/ToastProvider';
+import { MantineProvider, createTheme } from '@mantine/core';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import Stats from './pages/Stats';
@@ -22,25 +23,31 @@ const queryClient = new QueryClient({
   },
 });
 
+const theme = createTheme({
+  primaryColor: 'blue',
+  primaryShade: 6
+});
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="trades" element={<Trades />} />
-              <Route path="journal" element={<Journal />} />
-              <Route path="stats" element={<Stats />} />
-              <Route path="calendar" element={<Calendar />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="help" element={<Help />} />
-         
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
+      <MantineProvider theme={theme}>
+        <ToastProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="trades" element={<Trades />} />
+                <Route path="journal" element={<Journal />} />
+                <Route path="stats" element={<Stats />} />
+                <Route path="calendar" element={<Calendar />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="help" element={<Help />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </ToastProvider>
+      </MantineProvider>
     </QueryClientProvider>
   );
 }

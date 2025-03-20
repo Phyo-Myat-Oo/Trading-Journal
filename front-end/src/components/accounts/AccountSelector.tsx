@@ -1,14 +1,6 @@
 import { useState } from 'react';
 import { RiArrowDownSLine, RiAddLine, RiPencilLine } from 'react-icons/ri';
-
-interface Account {
-  id: string;
-  name: string;
-  isPrimary: boolean;
-  cashBalance: number;
-  activeBalance: number;
-  transactions: any[];
-}
+import { Account } from '../../types/account';
 
 interface AccountSelectorProps {
   accounts: Account[];
@@ -71,7 +63,7 @@ export function AccountSelector({
         </div>
         <div className="mt-2 flex items-baseline space-x-1">
           <span className="text-2xl font-bold text-white truncate">
-            ${(selectedAccount.cashBalance + selectedAccount.activeBalance).toFixed(2)}
+            ${selectedAccount.balance.toFixed(2)}
           </span>
           <span className="text-xs text-gray-400">USD</span>
         </div>

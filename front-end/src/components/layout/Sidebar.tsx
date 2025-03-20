@@ -11,18 +11,14 @@ import {
   RiPieChartLine
 } from 'react-icons/ri';
 import { AccountDialog } from '../dialogs/AccountDialog';
+import { TradeDialog } from '../dialogs/TradeDialog';
+import { TradeSetupDialog } from '../dialogs/TradeSetupDialog';
+import { DayNoteDialog, DayNoteData } from '../dialogs/DayNoteDialog';
 import { NavItem } from './NavItem';
 import { ActionButton } from '../common/ActionButton';
 import { AccountSelector } from '../accounts/AccountSelector';
-
-interface Account {
-  id: string;
-  name: string;
-  isPrimary: boolean;
-  cashBalance: number;
-  activeBalance: number;
-  transactions: any[];
-}
+import { Account, Transaction } from '../../types/account';
+import { useTradeStore } from '../../store/tradeStore';
 
 interface SidebarProps {
   isMobile: boolean;
@@ -30,71 +26,64 @@ interface SidebarProps {
 
 export function Sidebar({ isMobile }: SidebarProps) {
   const [isAccountDialogOpen, setIsAccountDialogOpen] = useState(false);
+  const [isTradeDialogOpen, setIsTradeDialogOpen] = useState(false);
+  const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(false);
+  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
   const [isNewAccount, setIsNewAccount] = useState(false);
-  const [accounts, setAccounts] = useState<Account[]>([
-    {
-      id: '1',
-      name: 'Default Account',
-      isPrimary: true,
-      cashBalance: 0.00,
-      activeBalance: 0.00,
-      transactions: [],
-    }
-  ]);
+  const [accounts, setAccounts] = useState<Account[]>([{
+    id: '1',
+    name: 'Default Account',
+    isPrimary: true,
+    balance: 0,
+    cashBalance: 0,
+    activeBalance: 0,
+    transactions: []
+  }]);
   const [selectedAccount, setSelectedAccount] = useState<Account>(accounts[0]);
+  const addDayNote = useTradeStore((state: { addDayNote: (note: Omit<DayNoteData, 'id'>) => void }) => state.addDayNote);
 
-  const handleAccountSave = (data: { 
-    name: string; 
-    cashBalance: number; 
-    activeBalance: number; 
+  const handleAccountSave = async (data: { 
+    name: string;
+    cashBalance: number;
+    activeBalance: number;
     isPrimary: boolean;
-    transactions: any[];
+    transactions: Transaction[];
   }) => {
-    if (isNewAccount) {
-      // Create new account
-      const newAccount: Account = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: data.name,
-        isPrimary: data.isPrimary,
-        cashBalance: data.cashBalance,
-        activeBalance: data.activeBalance,
-        transactions: data.transactions || []
-      };
-      
-      // If the new account is primary, remove primary from other accounts
-      const updatedAccounts = data.isPrimary 
-        ? accounts.map(acc => ({ ...acc, isPrimary: false }))
-        : [...accounts];
-      
-      setAccounts([...updatedAccounts, newAccount]);
-      setSelectedAccount(newAccount);
-      setIsNewAccount(false);
-    } else {
-      // Update existing account
-      const updatedAccount = {
-        ...selectedAccount,
-        name: data.name,
-        cashBalance: data.cashBalance,
-        activeBalance: data.activeBalance,
-        isPrimary: data.isPrimary,
-        transactions: data.transactions // Always use the transactions from the dialog
-      };
-
-      // If this account is being set as primary, remove primary from other accounts
-      const updatedAccounts = accounts.map(acc => {
-        if (acc.id === selectedAccount.id) {
-          return updatedAccount; // Always use the full updated account
-        } else if (data.isPrimary) {
-          return { ...acc, isPrimary: false }; // Remove primary from other accounts
-        } else {
-          return acc; // Leave other accounts unchanged
-        }
-      });
-
-      setAccounts(updatedAccounts);
-      setSelectedAccount(updatedAccount);
+    try {
+      if (isNewAccount) {
+        const newAccount: Account = {
+          ...data,
+          id: crypto.randomUUID(),
+          balance: data.cashBalance + data.activeBalance
+        };
+        setAccounts(prev => [...prev, newAccount]);
+        setSelectedAccount(newAccount);
+      } else if (selectedAccount) {
+        const updatedAccount = {
+          ...selectedAccount,
+          ...data,
+          balance: data.cashBalance + data.activeBalance
+        };
+        setAccounts(prev => prev.map(acc => 
+          acc.id === selectedAccount.id ? updatedAccount : acc
+        ));
+        setSelectedAccount(updatedAccount);
+      }
+    } catch (error) {
+      console.error('Error saving account:', error);
     }
-    setIsAccountDialogOpen(false);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!selectedAccount) return;
+    
+    try {
+      const nonDeletedAccounts = accounts.filter(acc => acc.id !== selectedAccount.id);
+      setAccounts(nonDeletedAccounts);
+      setSelectedAccount(nonDeletedAccounts[0]);
+    } catch (error) {
+      console.error('Error deleting account:', error);
+    }
   };
 
   const handleAddAccount = () => {
@@ -102,34 +91,68 @@ export function Sidebar({ isMobile }: SidebarProps) {
     setIsAccountDialogOpen(true);
   };
 
-  const handleDeleteAccount = () => {
-    // Don't allow deleting the last account
-    if (accounts.length <= 1) {
-      return;
+  const handleSaveTrade = async () => {
+    try {
+      // Handle trade save logic
+      setIsTradeDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving trade:', error);
     }
+  };
 
-    // Remove the account
-    const updatedAccounts = accounts.filter(acc => acc.id !== selectedAccount.id);
-
-    // If we're deleting the primary account, make another account primary
-    if (selectedAccount.isPrimary && updatedAccounts.length > 0) {
-      updatedAccounts[0].isPrimary = true;
+  const handleSaveSetup = async () => {
+    try {
+      // Handle setup save logic
+      setIsSetupDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving setup:', error);
     }
+  };
 
-    // Update state
-    setAccounts(updatedAccounts);
-    setSelectedAccount(updatedAccounts[0]); // Select the first remaining account
-    setIsAccountDialogOpen(false);
+  const handleSaveNote = async (data: DayNoteData) => {
+    try {
+      addDayNote(data);
+    } catch (error) {
+      console.error('Error saving day note:', error);
+    }
   };
 
   const navItems = [
-    { to: '/', icon: RiLayoutGridFill, label: 'Dashboard' },
-    { to: '/trades', icon: RiExchangeLine, label: 'Trades' },
-    { to: '/journal', icon: RiFileList2Line, label: 'Journal' },
-    { to: '/stats', icon: RiPieChartLine, label: 'Stats' },
-    { to: '/calendar', icon: RiCalendarLine, label: 'Calendar' },
-    { to: '/settings', icon: RiSettings4Line, label: 'Settings' },
-    { to: '/help', icon: RiQuestionLine, label: 'Help' },
+    {
+      to: '/',
+      icon: RiLayoutGridFill,
+      label: 'Dashboard'
+    },
+    {
+      to: '/trades',
+      icon: RiExchangeLine,
+      label: 'Trades'
+    },
+    {
+      to: '/journal',
+      icon: RiFileList2Line,
+      label: 'Journal'
+    },
+    {
+      to: '/stats',
+      icon: RiPieChartLine,
+      label: 'Stats'
+    },
+    {
+      to: '/calendar',
+      icon: RiCalendarLine,
+      label: 'Calendar'
+    },
+    {
+      to: '/settings',
+      icon: RiSettings4Line,
+      label: 'Settings'
+    },
+    {
+      to: '/help',
+      icon: RiQuestionLine,
+      label: 'Help'
+    }
   ];
 
   return (
@@ -171,19 +194,19 @@ export function Sidebar({ isMobile }: SidebarProps) {
         <ActionButton 
           icon={RiAddLine} 
           label="New Trade" 
-          onClick={() => {}} 
+          onClick={() => setIsTradeDialogOpen(true)} 
           variant="primary"
         />
         <ActionButton 
           icon={RiFileTextLine} 
           label="New Setup" 
-          onClick={() => {}} 
+          onClick={() => setIsSetupDialogOpen(true)} 
           variant="secondary"
         />
         <ActionButton 
           icon={RiFileList2Line} 
           label="New Note" 
-          onClick={() => {}} 
+          onClick={() => setIsNoteDialogOpen(true)} 
           variant="tertiary"
         />
       </div>
@@ -196,7 +219,7 @@ export function Sidebar({ isMobile }: SidebarProps) {
         }}
         onSave={handleAccountSave}
         onDelete={handleDeleteAccount}
-        currentBalance={0}
+        currentBalance={selectedAccount?.balance || 0}
         account={isNewAccount ? {
           id: '',
           name: '',
@@ -204,8 +227,27 @@ export function Sidebar({ isMobile }: SidebarProps) {
           transactions: [],
           cashBalance: 0,
           activeBalance: 0,
+          balance: 0,
         } : selectedAccount}
         canDelete={accounts.length > 1}
+      />
+
+      <TradeDialog 
+        isOpen={isTradeDialogOpen}
+        onClose={() => setIsTradeDialogOpen(false)}
+        onSave={handleSaveTrade}
+      />
+
+      <TradeSetupDialog
+        isOpen={isSetupDialogOpen}
+        onClose={() => setIsSetupDialogOpen(false)}
+        onSave={handleSaveSetup}
+      />
+
+      <DayNoteDialog
+        isOpen={isNoteDialogOpen}
+        onClose={() => setIsNoteDialogOpen(false)}
+        onSave={handleSaveNote}
       />
     </aside>
   );

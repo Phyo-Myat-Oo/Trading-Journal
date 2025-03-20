@@ -1,14 +1,32 @@
-import { useState } from 'react';
-import { TimeFilter } from '../types/filters';
+import { useState, useMemo } from 'react';
+import { TradeFilters, SortConfig, SortField } from '../types/filters';
 import { Trade } from '../types/trade';
 import { PerformanceChart } from '../components/charts/PerformanceChart';
 import { AccountDialog } from '../components/dialogs/AccountDialog';
 import { Transaction } from '../types/account';
+import { DashboardFilter } from '../components/filters/DashboardFilter';
+import { filterTrades } from '../utils/filter-trades';
+import { sortTrades } from '../utils/sort-trades';
+import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 
 export function Dashboard() {
-  const [selectedTimeFilter] = useState<TimeFilter>('This yr.');
+  // Default filter state
+  const [filters, setFilters] = useState<TradeFilters>({
+    timeFilter: 'This yr.',
+    dateRange: { startDate: null, endDate: null },
+    symbols: [],
+    statuses: [],
+    sides: []
+  });
+  
+  // Sort state
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>({
+    field: 'date',
+    direction: 'desc'
+  });
+  
   const [isAccountDialogOpen, setIsAccountDialogOpen] = useState(false);
-  const [trades] = useState<Trade[]>([
+  const [allTrades] = useState<Trade[]>([
     {
       id: '1',
       date: '11/03/2022',
@@ -59,18 +77,55 @@ export function Dashboard() {
     },
   ]);
 
-  // Calculate statistics
-  const wins = trades.filter(t => t.status === 'WIN');
-  const losses = trades.filter(t => t.status === 'LOSS');
-  const totalTrades = trades.length;
-  const winRate = totalTrades > 0 ? (wins.length / totalTrades * 100).toFixed(0) : 0;
+  // Apply filters to trades
+  const filteredTrades = useMemo(() => {
+    return filterTrades(allTrades, filters);
+  }, [allTrades, filters]);
   
-  const avgWin = wins.length > 0 
-    ? wins.reduce((acc, t) => acc + t.return, 0) / wins.length 
-    : 0;
-  const avgLoss = losses.length > 0
-    ? Math.abs(losses.reduce((acc, t) => acc + t.return, 0) / losses.length)
-    : 0;
+  // Apply sorting to filtered trades
+  const sortedTrades = useMemo(() => {
+    return sortTrades(filteredTrades, sortConfig);
+  }, [filteredTrades, sortConfig]);
+
+  // Extract unique symbols for the filter
+  const availableSymbols = useMemo(() => {
+    return [...new Set(allTrades.map(trade => trade.symbol))];
+  }, [allTrades]);
+
+  // Calculate statistics based on filtered trades
+  const wins = useMemo(() => filteredTrades.filter(t => t.status === 'WIN'), [filteredTrades]);
+  const losses = useMemo(() => filteredTrades.filter(t => t.status === 'LOSS'), [filteredTrades]);
+  const totalTrades = filteredTrades.length;
+  const winRate = useMemo(() => 
+    totalTrades > 0 ? (wins.length / totalTrades * 100).toFixed(0) : '0'
+  , [wins.length, totalTrades]);
+  
+  const avgWin = useMemo(() => 
+    wins.length > 0 
+      ? wins.reduce((acc, t) => acc + t.return, 0) / wins.length 
+      : 0
+  , [wins]);
+  
+  const avgLoss = useMemo(() => 
+    losses.length > 0
+      ? Math.abs(losses.reduce((acc, t) => acc + t.return, 0) / losses.length)
+      : 0
+  , [losses]);
+  
+  // Handle sorting when a table header is clicked
+  const handleSort = (field: SortField) => {
+    setSortConfig(prevConfig => {
+      if (prevConfig?.field === field) {
+        // Toggle direction if same field is clicked
+        return {
+          field,
+          direction: prevConfig.direction === 'asc' ? 'desc' : 'asc'
+        };
+      }
+      // Default to descending for new fields
+      return { field, direction: 'desc' };
+    });
+  };
 
   const handleAccountSave = (data: { 
     name: string; 
@@ -86,12 +141,19 @@ export function Dashboard() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Filter Section */}
+      <DashboardFilter 
+        filters={filters}
+        onFilterChange={setFilters}
+        availableSymbols={availableSymbols}
+      />
+
       {/* Chart and Stats Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4">
         {/* Chart Section */}
         <div className="lg:col-span-7 bg-[#1E2024] rounded-lg p-3 sm:p-4">
           <div className="w-full h-full min-h-[160px] sm:min-h-[180px]">
-            <PerformanceChart trades={trades} />
+            <PerformanceChart trades={filteredTrades} />
           </div>
         </div>
 
@@ -115,7 +177,7 @@ export function Dashboard() {
               <div className="flex items-center gap-2">
                 <span className="text-red-400 text-xs">{losses.length}</span>
                 <div className="w-8 h-8 rounded-full bg-[#282C34] flex items-center justify-center">
-                  <span className="text-red-400 text-xs">{(100 - Number(winRate))}%</span>
+                  <span className="text-red-400 text-xs">{totalTrades > 0 ? (100 - Number(winRate)) : 0}%</span>
                 </div>
               </div>
             </div>
@@ -174,11 +236,11 @@ export function Dashboard() {
               <span className="text-gray-400 text-xs">MAX LOSS</span>
               <div className="flex items-center gap-2">
                 <span className="text-red-400 text-xs">
-                  ${Math.min(...trades.map(t => t.return)).toFixed(2)}
+                  ${filteredTrades.length > 0 ? Math.min(...filteredTrades.map(t => t.return)).toFixed(2) : '0.00'}
                 </span>
                 <div className="w-8 h-8 rounded-full bg-[#282C34] flex items-center justify-center">
                   <span className="text-red-400 text-xs">
-                    {Math.min(...trades.map(t => t.returnPercent)).toFixed(1)}%
+                    {filteredTrades.length > 0 ? Math.min(...filteredTrades.map(t => t.returnPercent)).toFixed(1) : '0.0'}%
                   </span>
                 </div>
               </div>
@@ -189,12 +251,12 @@ export function Dashboard() {
             <div className="flex items-center justify-between">
               <span className="text-gray-400 text-xs">PnL</span>
               <div className="flex items-center gap-2">
-                <span className={`text-xs ${trades.reduce((acc, t) => acc + t.return, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  ${trades.reduce((acc, t) => acc + t.return, 0).toFixed(2)}
+                <span className={`text-xs ${filteredTrades.reduce((acc, t) => acc + t.return, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  ${filteredTrades.reduce((acc, t) => acc + t.return, 0).toFixed(2)}
                 </span>
                 <div className="w-8 h-8 rounded-full bg-[#282C34] flex items-center justify-center">
-                  <span className={`text-xs ${trades.reduce((acc, t) => acc + t.returnPercent, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {trades.reduce((acc, t) => acc + t.returnPercent, 0).toFixed(1)}%
+                  <span className={`text-xs ${filteredTrades.reduce((acc, t) => acc + t.returnPercent, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {filteredTrades.reduce((acc, t) => acc + t.returnPercent, 0).toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -209,23 +271,83 @@ export function Dashboard() {
           <table className="w-full whitespace-nowrap">
             <thead>
               <tr className="text-left text-[10px] sm:text-xs text-gray-400 border-b border-[#282C34]">
-                <th className="p-3 sm:p-4 font-medium">DATE</th>
-                <th className="p-3 sm:p-4 font-medium">SYMBOL</th>
-                <th className="p-3 sm:p-4 font-medium">STATUS</th>
-                <th className="p-3 sm:p-4 font-medium">SIDE</th>
-                <th className="p-3 sm:p-4 font-medium">QTY</th>
-                <th className="p-3 sm:p-4 font-medium">ENTRY</th>
-                <th className="p-3 sm:p-4 font-medium">EXIT</th>
-                <th className="p-3 sm:p-4 font-medium">ENT TOT</th>
-                <th className="p-3 sm:p-4 font-medium">EXT TOT</th>
+                <SortableTableHeader
+                  label="DATE"
+                  field="date"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="SYMBOL"
+                  field="symbol"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="STATUS"
+                  field="status"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="SIDE"
+                  field="side"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="QTY"
+                  field="qty"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="ENTRY"
+                  field="entry"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="EXIT"
+                  field="exit"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="ENT TOT"
+                  field="entryTotal"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="EXT TOT"
+                  field="exitTotal"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
                 <th className="p-3 sm:p-4 font-medium">POS</th>
-                <th className="p-3 sm:p-4 font-medium">HOLD</th>
-                <th className="p-3 sm:p-4 font-medium">RETURN</th>
-                <th className="p-3 sm:p-4 font-medium">RETURN %</th>
+                <SortableTableHeader
+                  label="HOLD"
+                  field="hold"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="RETURN"
+                  field="return"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  label="RETURN %"
+                  field="returnPercent"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
               </tr>
             </thead>
             <tbody>
-              {trades.map((trade) => (
+              {sortedTrades.map((trade) => (
                 <tr 
                   key={trade.id}
                   className="text-[11px] sm:text-sm border-b border-[#282C34] hover:bg-[#282C34] transition-colors duration-150"

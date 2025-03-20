@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Trade, TradeSetup, DayNote } from '../types/trading';
 
-interface TradeStore {
+export interface TradeStore {
   trades: Trade[];
   setups: TradeSetup[];
   dayNotes: DayNote[];
@@ -33,8 +33,8 @@ export const useTradeStore = create<TradeStore>()(
       setups: [],
       dayNotes: [],
       selectedPeriod: {
-        start: new Date(new Date().getFullYear(), 0, 1).toISOString(),
-        end: new Date().toISOString(),
+        start: new Date(new Date().getFullYear(), 0, 1).toISOString(), // Start of current year
+        end: new Date().toISOString(), // Current date
       },
 
       // Trade Actions
@@ -92,7 +92,8 @@ export const useTradeStore = create<TradeStore>()(
         })),
     }),
     {
-      name: 'trade-storage',
+      name: 'trade-storage', // unique name for localStorage
+      version: 1, // version number for migrations
     }
   )
 ); 
