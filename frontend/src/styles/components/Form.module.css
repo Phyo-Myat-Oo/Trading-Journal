@@ -1,0 +1,87 @@
+.formGroup {
+  @apply flex flex-col gap-1;
+}
+
+.label {
+  @apply text-sm font-medium text-gray-300;
+}
+
+.input {
+  @apply bg-[#1E2024] rounded-lg px-4 py-2 text-sm text-gray-300 border border-transparent focus:border-blue-500 outline-none transition-colors;
+}
+
+.inputError {
+  @apply border-red-500;
+}
+
+.inputWithIcon {
+  @apply pl-10;
+}
+
+.inputIcon {
+  @apply absolute left-3 top-1/2 -translate-y-1/2 text-gray-400;
+}
+
+.select {
+  @apply bg-[#1E2024] rounded-lg px-4 py-2 text-sm text-gray-300 border border-transparent focus:border-blue-500 outline-none appearance-none pr-10 transition-colors;
+}
+
+.selectIcon {
+  @apply absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none;
+}
+
+.datePicker {
+  @apply bg-[#1E2024] rounded-lg px-4 py-2 text-sm text-gray-300 border border-transparent focus:border-blue-500 outline-none transition-colors cursor-text;
+}
+
+.datePickerIcon {
+  @apply text-gray-400 hover:text-gray-300 flex-shrink-0 ml-2 cursor-pointer;
+}
+
+.errorMessage {
+  @apply text-xs text-red-500;
+}
+
+.helpText {
+  @apply text-xs text-gray-400;
+}
+
+.checkbox {
+  @apply h-4 w-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900;
+}
+
+.checkboxLabel {
+  @apply ml-2 text-sm text-gray-300;
+}
+
+.radio {
+  @apply h-4 w-4 border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900;
+}
+
+.radioLabel {
+  @apply ml-2 text-sm text-gray-300;
+}
+
+.toggle {
+  @apply relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900;
+}
+
+.toggleEnabled {
+  @apply bg-blue-500;
+}
+
+.toggleDisabled {
+  @apply bg-gray-600;
+}
+
+.toggleHandle {
+  @apply pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out;
+}
+
+.toggleHandleEnabled {
+  @apply translate-x-5;
+}
+
+.toggleHandleDisabled {
+  @apply translate-x-0;
+} 

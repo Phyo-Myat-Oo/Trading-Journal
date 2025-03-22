@@ -1,0 +1,31 @@
+/* Global styles for the Trading Journal application */
+
+/* Make dialogs appear above all other elements */
+.dialog-top-layer {
+  z-index: 99999 !important;
+}
+
+/* Dialog backdrop should also be high z-index */
+.dialog-backdrop {
+  z-index: 99998 !important;
+}
+
+/* Override Headless UI Dialog z-index */
+[data-headlessui-state="open"] {
+  z-index: 99999;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;     /* Firefox */
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+} 

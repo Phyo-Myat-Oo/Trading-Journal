@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-[#13151A] text-gray-100;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-[#1E2024];
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-700 rounded-full hover:bg-gray-600 transition-colors;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-blue-500 text-white hover:bg-blue-600;
+  }
+
+  .btn-secondary {
+    @apply bg-[#1E2024] text-gray-200 hover:bg-gray-800;
+  }
+
+  .btn-danger {
+    @apply bg-red-500 text-white hover:bg-red-600;
+  }
+
+  .input {
+    @apply bg-[#1E2024] border border-[#282C34] rounded-lg px-3 py-2 text-gray-200 
+    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+
+  .table {
+    @apply w-full border-collapse;
+  }
+
+  .table th {
+    @apply px-4 py-2 text-left text-sm font-medium text-gray-400 border-b border-[#282C34];
+  }
+
+  .table td {
+    @apply px-4 py-2 text-sm text-gray-300 border-b border-[#282C34];
+  }
+
+  .table tr:hover {
+    @apply bg-[#282C34] transition-colors duration-150;
+  }
+
+  /* Card styles */
+  .card {
+    @apply bg-[#1E2024] rounded-lg border border-[#282C34];
+  }
+
+  .card-header {
+    @apply p-4 border-b border-[#282C34];
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  /* Badge styles */
+  .badge {
+    @apply px-2 py-1 rounded-lg text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply bg-green-500/20 text-green-400;
+  }
+
+  .badge-error {
+    @apply bg-red-500/20 text-red-400;
+  }
+
+  .badge-warning {
+    @apply bg-yellow-500/20 text-yellow-400;
+  }
+
+  .badge-info {
+    @apply bg-blue-500/20 text-blue-400;
+  }
+}

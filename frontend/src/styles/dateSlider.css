@@ -1,0 +1,63 @@
+/* Hide default slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Slider track - Chrome, Safari, Opera */
+input[type="range"]::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 4px;
+}
+
+/* Slider track - Firefox */
+input[type="range"]::-moz-range-track {
+  background: transparent;
+  height: 4px;
+}
+
+/* Slider thumb - Chrome, Safari, Opera */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4px;
+  background-color: #2563eb; /* blue-600 */
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+}
+
+/* Slider thumb - Firefox */
+input[type="range"]::-moz-range-thumb {
+  border: none;
+  background-color: #2563eb; /* blue-600 */
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+}
+
+/* Remove focus outline */
+input[type="range"]:focus {
+  outline: none;
+}
+
+/* Slider hover and focus states */
+input[type="range"]:hover::-webkit-slider-thumb {
+  background-color: #3b82f6; /* blue-500 */
+}
+
+input[type="range"]:hover::-moz-range-thumb {
+  background-color: #3b82f6; /* blue-500 */
+}
+
+/* No scrollbar class */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+} 

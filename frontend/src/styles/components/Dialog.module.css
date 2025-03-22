@@ -1,0 +1,83 @@
+.backdrop {
+  @apply fixed inset-0 z-50 overflow-y-auto bg-black/50 flex min-h-screen items-center justify-center p-4;
+}
+
+.dialog {
+  @apply relative w-full bg-gray-900 rounded-lg shadow-xl;
+}
+
+.header {
+  @apply flex items-center justify-between border-b border-gray-700 px-6 py-4;
+}
+
+.title {
+  @apply text-lg font-medium text-gray-200;
+}
+
+.closeButton {
+  @apply text-gray-400 hover:text-gray-300;
+}
+
+.content {
+  @apply p-6;
+}
+
+.footer {
+  @apply flex items-center justify-end gap-3 border-t border-gray-700 px-6 py-4;
+}
+
+/* Dialog sizes */
+.sm {
+  @apply max-w-sm;
+}
+
+.md {
+  @apply max-w-md;
+}
+
+.lg {
+  @apply max-w-lg;
+}
+
+.xl {
+  @apply max-w-xl;
+}
+
+.full {
+  @apply max-w-full mx-4;
+}
+
+/* Animation classes */
+.dialog[data-state="entering"],
+.dialog[data-state="entered"] {
+  @apply opacity-100 scale-100;
+}
+
+.dialog[data-state="exiting"],
+.dialog[data-state="exited"] {
+  @apply opacity-0 scale-95;
+}
+
+/* Focus styles */
+.dialog:focus {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-900;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 640px) {
+  .dialog {
+    @apply mx-4;
+  }
+
+  .header {
+    @apply px-4 py-3;
+  }
+
+  .content {
+    @apply p-4;
+  }
+
+  .footer {
+    @apply px-4 py-3;
+  }
+} 
