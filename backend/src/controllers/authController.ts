@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import { CookieOptions } from 'express';
 import * as tokenService from '../services/tokenService';
+import { RefreshToken } from '../models/RefreshToken';
 
 /**
  * Register a new user
@@ -88,6 +89,23 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
+    // Check if account is locked
+    if (user.accountLocked && user.accountLockedUntil) {
+      const now = new Date();
+      if (now < user.accountLockedUntil) {
+        const remainingTimeMinutes = Math.ceil((user.accountLockedUntil.getTime() - now.getTime()) / (60 * 1000));
+        return res.status(401).json({ 
+          message: `Account is locked. Please try again in ${remainingTimeMinutes} minute${remainingTimeMinutes > 1 ? 's' : ''}.`,
+          isLocked: true
+        });
+      } else {
+        // Lock period expired, reset the lock
+        user.accountLocked = false;
+        user.accountLockedUntil = undefined;
+        // Keep failed attempts counter as is - don't reset it yet
+      }
+    }
+
     // Check if user is verified
     if (!user.isVerified) {
       return res.status(401).json({ 
@@ -99,8 +117,79 @@ export const login = async (req: Request, res: Response) => {
     // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      // Increment failed login attempts
+      user.failedLoginAttempts += 1;
+      
+      // Check if account should be locked
+      if (user.failedLoginAttempts >= config.accountLockout.maxLoginAttempts) {
+        // Calculate lockout duration based on the number of previous lockouts
+        let lockoutDuration = 15 * 60 * 1000; // 15 minutes for first lockout
+        let requiresAdminUnlock = false;
+        
+        // Use the previousLockouts field to determine lockout duration
+        const lockoutCount = user.previousLockouts;
+        
+        if (lockoutCount === 0) {
+          // First lockout: 15 minutes (default)
+          lockoutDuration = 15 * 60 * 1000;
+        } else if (lockoutCount === 1) {
+          // Second lockout: 30 minutes
+          lockoutDuration = 30 * 60 * 1000;
+        } else {
+          // Third+ lockout: 60 minutes
+          lockoutDuration = 60 * 60 * 1000;
+          
+          // If it's more than 3 lockouts, flag for admin attention
+          if (lockoutCount >= 3) {
+            requiresAdminUnlock = true;
+          }
+        }
+        
+        user.accountLocked = true;
+        user.accountLockedUntil = new Date(Date.now() + lockoutDuration);
+        user.previousLockouts += 1; // Increment the previous lockouts counter
+        
+        await user.save();
+        
+        // Send account lockout notification email
+        try {
+          const lockoutMinutes = Math.ceil(lockoutDuration / (60 * 1000));
+          await emailService.sendAccountLockoutEmail({
+            email: user.email,
+            firstName: user.firstName,
+            lockoutDuration: lockoutMinutes,
+            lockedUntil: user.accountLockedUntil,
+            frontendUrl: config.frontendUrl,
+            requiresAdminUnlock: requiresAdminUnlock
+          });
+        } catch (emailError) {
+          console.error('Failed to send account lockout email:', emailError);
+          // Continue even if email fails - don't expose this error to client
+        }
+        
+        const lockoutMinutes = Math.ceil(lockoutDuration / (60 * 1000));
+        let message = `Account locked due to too many failed login attempts. Please try again in ${lockoutMinutes} minute${lockoutMinutes > 1 ? 's' : ''}.`;
+        
+        if (requiresAdminUnlock) {
+          message = `Account locked due to excessive failed login attempts. Please contact an administrator.`;
+        }
+        
+        return res.status(401).json({ 
+          message: message,
+          isLocked: true,
+          requiresAdminUnlock: requiresAdminUnlock
+        });
+      }
+      
+      await user.save();
       return res.status(401).json({ message: 'Invalid credentials' });
     }
+
+    // If login successful, reset failed login attempts
+    user.failedLoginAttempts = 0;
+    user.accountLocked = false;
+    user.accountLockedUntil = undefined;
+    // Note: Don't reset previousLockouts - that's a permanent record
 
     // Generate access token
     const accessToken = tokenService.generateAccessToken(user);
@@ -111,12 +200,15 @@ export const login = async (req: Request, res: Response) => {
     // Set refresh token in HTTP-only cookie
     const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: false, // Set to false in development for http://localhost
+      sameSite: 'lax', // Use 'lax' for all environments for better compatibility
+      path: '/',
       maxAge: expiresAt.getTime() - Date.now() // Use actual expiration time from token
     };
     
+    console.log(`Setting refreshToken cookie with options:`, JSON.stringify(cookieOptions, null, 2));
     res.cookie('refreshToken', refreshToken, cookieOptions as CookieOptions);
+    console.log(`Cookie set, refreshToken length: ${refreshToken.length}`);
 
     // Update last login
     user.lastLogin = new Date();
@@ -268,6 +360,8 @@ export const refreshToken = async (req: Request, res: Response) => {
     const refreshToken = req.cookies.refreshToken;
     
     console.log('Refresh token request received');
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Cookies received:', JSON.stringify(req.cookies, null, 2));
     
     if (!refreshToken) {
       console.log('No refresh token found in cookies');
@@ -275,6 +369,9 @@ export const refreshToken = async (req: Request, res: Response) => {
         message: 'Refresh token not found'
       });
     }
+
+    // Log token information (without revealing full token for security)
+    console.log(`Refresh token found, length: ${refreshToken.length}, first 10 chars: ${refreshToken.substring(0, 10)}...`);
 
     // Verify and validate refresh token
     const { userId, jti, isValid } = await tokenService.verifyRefreshToken(refreshToken);
@@ -306,8 +403,9 @@ export const refreshToken = async (req: Request, res: Response) => {
     // Set the new refresh token as a cookie
     const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: false, // Set to false in development for http://localhost
+      sameSite: 'lax', // Use 'lax' for all environments for better compatibility
+      path: '/',
       maxAge: expiresAt.getTime() - Date.now() // Use actual expiration time from token
     };
     
@@ -326,73 +424,92 @@ export const refreshToken = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    // Get the refresh token from the cookie
-    const refreshToken = req.cookies.refreshToken;
+    const userId = req.user?.id;
     
-    if (refreshToken) {
-      // Attempt to verify and revoke the token
+    // Log the logout attempt for debugging purposes
+    console.log(`[${new Date().toISOString()}] Logout attempt from user ID: ${userId || 'unknown'}`);
+    
+    // Only try to revoke tokens if we have a user ID
+    if (userId) {
+      console.log(`Revoking tokens for user: ${userId}`);
+      
       try {
-        const { jti, isValid } = await tokenService.verifyRefreshToken(refreshToken);
+        // Fetch user to check if they have refresh tokens
+        const user = await User.findById(userId);
         
-        if (isValid && jti) {
-          // Revoke the specific token
-          await tokenService.revokeRefreshToken(jti);
-          console.log(`Revoked refresh token with jti: ${jti}`);
+        // Check if user exists and has refresh tokens
+        if (user && user.refreshTokens && user.refreshTokens.length > 0) {
+          // Revoke all refresh tokens for the user to ensure complete logout
+          console.log(`User has ${user.refreshTokens.length} tokens to revoke`);
+          const result = await RefreshToken.deleteMany({ user: userId });
+          console.log(`Revoked all ${result.deletedCount} tokens for user ${userId}`);
+          
+          // Update the user document to clear the refreshTokens array
+          await User.findByIdAndUpdate(userId, { $set: { refreshTokens: [] } });
+        } else {
+          console.log(`User ${userId} has no tokens to revoke or user not found`);
         }
-        
-        // If user is authenticated, revoke all their tokens for complete logout
-        if (req.user?.id) {
-          const count = await tokenService.revokeAllUserTokens(new Types.ObjectId(req.user.id));
-          console.log(`Revoked all ${count} tokens for user: ${req.user.id}`);
-        }
-      } catch (error) {
-        console.error('Error revoking token during logout:', error);
-        // Continue with logout even if token revocation fails
+      } catch (dbError) {
+        console.error('Database error during logout:', dbError);
+        // Continue with cookie clearing even if token revocation fails
       }
+    } else {
+      console.log('No user ID in request, unable to revoke refresh tokens');
     }
     
-    // Clear the refresh token cookie
+    // Clear the refresh token cookie regardless of token revocation
+    console.log('Clearing refresh token cookie');
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: false,
+      sameSite: 'lax',
       path: '/'
     });
     
-    res.json({ message: 'Logged out successfully' });
+    return res.status(200).json({ message: 'Logged out successfully' });
   } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({ message: 'Server error during logout' });
+    console.error('Error during logout:', error);
+    return res.status(500).json({ message: 'Error during logout' });
   }
 };
 
 // Debug endpoint to check cookie settings
 export const checkCookies = async (req: Request, res: Response) => {
-  // Check if this is a silent request from the frontend
-  const isSilentRequest = req.headers['x-silent-request'] === 'true';
-  
-  // Only log if not a silent request
-  if (!isSilentRequest) {
-    console.log('Checking cookies...');
-    console.log('All cookies:', req.cookies);
-    console.log('Headers:', req.headers);
+  try {
+    // Get all cookies
+    const cookies = req.cookies;
+    
+    // Test setting a new cookie
+    const testCookieOptions = {
+      httpOnly: false, // Make visible to JavaScript
+      secure: false, // Match other cookie settings
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60000 // 1 minute
+    };
+    
+    res.cookie('cookieTest', 'test-value', testCookieOptions as CookieOptions);
+    
+    // Check for the refresh token cookie specifically
+    const hasRefreshToken = !!cookies.refreshToken;
+    
+    // Return diagnostic information
+    return res.status(200).json({
+      cookiesReceived: cookies,
+      hasRefreshToken,
+      serverTime: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      cookieSettings: {
+        secure: false, // Actual setting used
+        sameSite: 'lax', // Actual setting used
+        httpOnly: true,
+        path: '/'
+      }
+    });
+  } catch (error) {
+    console.error('Error checking cookies:', error);
+    return res.status(500).json({ message: 'Server error checking cookies' });
   }
-
-  // Set a test cookie
-  res.cookie('testCookie', 'test-value', {
-    httpOnly: true,
-    secure: false, // Disable secure for local development
-    sameSite: 'lax',
-    maxAge: 60 * 1000, // 1 minute
-    path: '/'
-  });
-
-  return res.json({
-    message: 'Cookie check completed',
-    cookies: req.cookies,
-    refreshTokenExists: !!req.cookies.refreshToken,
-    environment: process.env.NODE_ENV || 'development'
-  });
 };
 
 export const verifyEmail = async (req: Request, res: Response) => {
@@ -492,4 +609,88 @@ export const resendVerification = async (req: Request, res: Response) => {
     console.error('Error resending verification email:', error);
     res.status(500).json({ message: 'Server error during verification email resend' });
   }
-}; 
+};
+
+export const getUserSessions = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    const userId = new Types.ObjectId(req.user.id);
+    const sessions = await tokenService.getUserActiveSessions(userId);
+
+    res.json({
+      success: true,
+      sessions
+    });
+  } catch (error) {
+    console.error('Error getting user sessions:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching active sessions' 
+    });
+  }
+};
+
+export const revokeSession = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Session ID is required' 
+      });
+    }
+
+    const userId = new Types.ObjectId(req.user.id);
+    const success = await tokenService.revokeSession(sessionId, userId);
+
+    if (success) {
+      res.json({
+        success: true,
+        message: 'Session terminated successfully'
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: 'Session not found or already terminated'
+      });
+    }
+  } catch (error) {
+    console.error('Error revoking session:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error terminating session' 
+    });
+  }
+};
+
+(async () => {
+  // Only run in browser environment
+  if (typeof window === 'undefined') return;
+  
+  try {
+    // Wait for DOM to be fully loaded
+    if (document.readyState === 'loading') {
+      await new Promise(resolve => {
+        document.addEventListener('DOMContentLoaded', resolve);
+      });
+    }
+    
+    // Only check session if there's a user in localStorage
+    if (localStorage.getItem('user')) {
+      console.log('User found in storage, checking session status on page load...');
+      await checkSessionStatus();
+    } else {
+      console.log('No user in storage, skipping session check');
+    }
+  } catch (error) {
+    console.error('Error during automatic session recovery:', error);
+  }
+})(); 

@@ -43,16 +43,15 @@ const Login = () => {
   // Add a global form submission detector
   useEffect(() => {
     const detectFormSubmission = (e: Event) => {
-      console.log('%c GLOBAL FORM SUBMISSION DETECTED', 'background: #ff00ff; color: white; font-size: 16px');
-      console.log('Event:', e);
-      console.log('Target:', e.target);
-      
-      // Always prevent default for any form submission while on login page
-      e.preventDefault();
-      e.stopPropagation();
-      
-      // Immediately return false to try to stop the propagation
-      return false;
+      // Only prevent default if we're submitting the login form
+      const target = e.target as HTMLElement;
+      if (target.closest('form')?.id === 'login-form') {
+        console.log('Login form submission detected');
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+      return true;
     };
     
     // Capture phase to intercept before any other handlers
@@ -81,21 +80,12 @@ const Login = () => {
   useEffect(() => {
     console.log('Login component mounted');
     
-    // Log DOM state
-    const logDomState = () => {
-      console.log('Current document.location:', document.location.href);
-      console.log('Current history state:', window.history.state);
-    };
-    
-    // Log initial state
-    logDomState();
-    
-    // Set up interval to check for DOM changes
-    const interval = setInterval(logDomState, 2000);
+    // Log DOM state only once on component mount
+    console.log('Current document.location:', document.location.href);
+    console.log('Current history state:', window.history.state);
     
     return () => {
       console.log('Login component unmounted');
-      clearInterval(interval);
     };
   }, []);
 

@@ -1,7 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import authService from '../services/authService';
-import { LoginData, RegisterData } from '../services/authService';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { AxiosError } from 'axios';
+import authService, { LoginData, RegisterData } from '../services/authService';
+
+// Add a simple debug logging function to control verbosity
+const debugLog = (message: string, data?: unknown) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[Auth] ${message}`, data || '');
+  }
+};
 
 interface User {
   id: string;
@@ -23,117 +29,124 @@ interface AuthContextType {
   clearError: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+type AuthProviderProps = {
+  children: React.ReactNode;
+};
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tokenCheckInterval, setTokenCheckInterval] = useState<number | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  
+  // Add a ref to track initialization state
+  const isInitializing = useRef(false);
+  const isInitialized = useRef(false);
 
   // Set up token refresh mechanism
   useEffect(() => {
+    // Only initialize once
+    if (isInitialized.current) {
+      debugLog('Auth already initialized, skipping');
+      return;
+    }
+    
+    // Prevent concurrent initializations
+    if (isInitializing.current) {
+      debugLog('Auth initialization already in progress, skipping duplicate');
+      return;
+    }
+    
     // Check if user is already logged in
     const initAuth = async () => {
-      console.log('Starting auth initialization...');
-      const currentUser = authService.getCurrentUser();
+      // Set initializing flag
+      isInitializing.current = true;
       
-      if (currentUser) {
-        console.log('User found in localStorage, restoring session', currentUser);
-        setUser(currentUser);
+      debugLog('Starting auth initialization');
+      try {
+        // Get user from localStorage (might be null)
+        const currentUser = authService.getCurrentUser();
         
-        // Skip token validation if there's no token
-        if (!authService.getToken()) {
-          console.log('No token found despite user in localStorage, logging out silently');
-          await logout(true);
-          setLoading(false);
-          return;
-        }
-        
-        // If token is expired or about to expire, try to refresh it
-        if (authService.isTokenExpired()) {
-          console.log('Token is expired during initialization, attempting refresh');
-          try {
-            const success = await authService.refreshToken();
-            if (!success) {
-              console.log('Token refresh failed during init, logging out');
-              // Silent logout if refresh fails during initialization
-              await logout(true);
-            } else {
-              console.log('Token refreshed successfully during init');
-              // Start periodic token validation after successful refresh
-              startTokenRefreshTimer();
-            }
-          } catch (error) {
-            console.error('Error during initialization token refresh:', error);
-            await logout(true);
+        // Simple initialization path: if we have a user, try to refresh the token
+        if (currentUser) {
+          debugLog('User found in localStorage, attempting token refresh');
+          const refreshSuccessful = await authService.refreshToken();
+          
+          if (refreshSuccessful) {
+            debugLog('Token refresh successful, restoring user session');
+            setUser(currentUser);
+            startTokenRefreshTimer();
+          } else {
+            // Clear stale user data if refresh fails
+            debugLog('Token refresh failed, clearing user data');
+            localStorage.removeItem('user');
           }
         } else {
-          console.log('Token is still valid during initialization');
-          // Token is still valid, start refresh timer
-        startTokenRefreshTimer();
+          debugLog('No user found in localStorage, proceeding as unauthenticated');
         }
-      } else {
-        console.log('No user found in localStorage');
+        
+        // Mark as initialized at the end of successful initialization
+        isInitialized.current = true;
+      } catch (error) {
+        console.error('Error during auth initialization:', error);
+      } finally {
+        // Clear initializing flag
+        isInitializing.current = false;
+        setLoading(false);
       }
-      
-      setLoading(false);
     };
 
     initAuth();
-
-    // Cleanup function to clear the interval when component unmounts
+    
+    // Cleanup function
     return () => {
       if (tokenCheckInterval) {
-        console.log('Clearing token check interval on component unmount');
+        debugLog('Cleaning up token check interval');
         window.clearInterval(tokenCheckInterval);
       }
     };
   }, []);
 
-  // Setup periodic token refresh
+  // Setup periodic token refresh using the standardized strategy
   const startTokenRefreshTimer = () => {
     // Clear any existing interval
     if (tokenCheckInterval) {
-      console.log('Clearing existing token check interval');
+      debugLog('Clearing existing token check interval');
       window.clearInterval(tokenCheckInterval);
     }
 
-    console.log('Starting new token refresh timer');
+    debugLog('Starting new token refresh timer');
     
-    // Check token every minute (adequate balance between responsiveness and efficiency)
+    // Check token every 5 minutes (better balance to prevent expiration edge cases)
     const intervalId = window.setInterval(async () => {
       try {
-        console.log('Token refresh check triggered by timer');
-        
-        // Check if token exists and decode it
+        // Check if token exists
         const token = authService.getToken();
         if (!token) {
-          console.log('No token found, cannot check expiration');
+          debugLog('No token found, cannot check expiration');
           return;
         }
         
+        // Use the standard expiration check
         if (authService.isTokenExpired()) {
-          console.log('Token is expired, attempting refresh...');
+          debugLog('Token needs refresh');
           const success = await authService.refreshToken();
           if (!success) {
-            console.warn('Scheduled token refresh failed, logging out user');
-            // If refresh fails, logout user
+            debugLog('Scheduled token refresh failed, logging out user');
             await logout();
           } else {
-            console.log('Scheduled token refresh succeeded');
+            debugLog('Scheduled token refresh succeeded');
           }
         } else {
-          console.log('Token still valid, no refresh needed');
+          debugLog('Token still valid, no refresh needed');
         }
       } catch (error) {
         console.error('Error during token refresh check:', error);
       }
-    }, 60000); // Check every minute
+    }, 300000); // Check every 5 minutes
 
     setTokenCheckInterval(intervalId);
   };
@@ -207,28 +220,53 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = async (silent: boolean = false) => {
-    console.log('Logout called, silent mode:', silent);
+    // Prevent multiple logout calls
+    if (isLoggingOut) {
+      console.log('AuthContext: Logout already in progress, ignoring duplicate call');
+      return;
+    }
     
-    // Clear the token refresh interval
+    console.log('AuthContext: Logout called, silent mode:', silent);
+    setIsLoggingOut(true);
+    
+    // Clear the token refresh interval immediately
     if (tokenCheckInterval) {
       console.log('Clearing token check interval during logout');
       window.clearInterval(tokenCheckInterval);
       setTokenCheckInterval(null);
     }
     
+    // Clear user data immediately to prevent further API calls
+    console.log('Resetting user state before API call');
+    setUser(null);
+    setError(null);
+    
+    // Call the API only after clearing local state
     if (!silent) {
       try {
         console.log('Calling logout endpoint');
-    await authService.logout();
+        // Wait at most 3 seconds for the logout call
+        const logoutPromise = authService.logout();
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Logout timeout')), 3000);
+        });
+        
+        try {
+          await Promise.race([logoutPromise, timeoutPromise]);
+          console.log('Logout API call completed successfully');
+        } catch {
+          console.warn('Logout API call timed out, but local logout completed');
+        }
       } catch (err) {
         console.error('Error during logout API call:', err);
         // Continue with local logout even if API call fails
       }
     }
     
-    console.log('Resetting user state');
-    setUser(null);
-    setError(null);
+    // Reset logout state after a delay
+    setTimeout(() => {
+      setIsLoggingOut(false);
+    }, 2000);
   };
 
   const refreshToken = async (): Promise<boolean> => {
@@ -260,7 +298,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = (): AuthContextType => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');

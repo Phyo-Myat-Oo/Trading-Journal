@@ -7,6 +7,15 @@ interface VerificationEmailParams {
   frontendUrl?: string;
 }
 
+interface AccountLockoutEmailParams {
+  email: string;
+  firstName: string;
+  lockoutDuration: number; // in minutes
+  lockedUntil: Date;
+  frontendUrl?: string;
+  requiresAdminUnlock?: boolean;
+}
+
 class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -130,6 +139,148 @@ class EmailService {
     } catch (error) {
       console.error('[EmailService] Failed to send reset password email:', error);
       throw error;
+    }
+  }
+
+  async sendAccountLockoutEmail(params: AccountLockoutEmailParams): Promise<void> {
+    const { email, firstName, lockoutDuration, lockedUntil, frontendUrl: userProvidedUrl, requiresAdminUnlock } = params;
+    
+    // In test mode, don't actually send emails
+    if (process.env.NODE_ENV === 'test') {
+      console.log('Test mode: Account lockout email would be sent to', email);
+      return;
+    }
+    
+    // Use provided frontendUrl, env frontendUrl, or default
+    const frontendUrl = userProvidedUrl || process.env.FRONTEND_URL || 'http://localhost:5173';
+    
+    // Format the lockout time into a readable string
+    const lockedUntilTime = lockedUntil.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    
+    // Format the date
+    const lockedUntilDate = lockedUntil.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric'
+    });
+    
+    // Customize message based on whether admin unlock is required
+    const adminUnlockMessage = requiresAdminUnlock 
+      ? `<p><strong>Note:</strong> Due to multiple lockouts, your account now requires administrator assistance to unlock. Please contact support for help.</p>`
+      : '';
+    
+    const adminUnlockTextMessage = requiresAdminUnlock
+      ? `Note: Due to multiple lockouts, your account now requires administrator assistance to unlock. Please contact support for help.`
+      : '';
+    
+    try {
+      await this.transporter.sendMail({
+        from: process.env.SMTP_FROM || 'Trading Journal <noreply@trading-journal.com>',
+        to: email,
+        subject: 'Account Security Alert - Your Account Has Been Locked',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+            <h2 style="color: #d32f2f;">Account Security Alert</h2>
+            <p>Hello ${firstName},</p>
+            <p>We've detected multiple failed login attempts to your Trading Journal account. For your security, we've temporarily locked your account.</p>
+            <p><strong>Account Status:</strong> Locked</p>
+            <p><strong>Lockout Duration:</strong> ${lockoutDuration} minute${lockoutDuration !== 1 ? 's' : ''}</p>
+            <p><strong>Account will be unlocked at:</strong> ${lockedUntilTime} on ${lockedUntilDate}</p>
+            ${adminUnlockMessage}
+            <p>If you didn't attempt to log in recently, we recommend changing your password immediately once your account is unlocked.</p>
+            <p>To reset your password once your account is unlocked, visit <a href="${frontendUrl}/forgot-password">Reset Password</a>.</p>
+            <p>If you need immediate assistance, please contact our support team.</p>
+            <p style="margin-top: 30px;">Regards,<br>The Trading Journal Team</p>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #777;">
+              <p>This is an automated message. Please do not reply to this email.</p>
+            </div>
+          </div>
+        `,
+        text: `
+          Account Security Alert
+          
+          Hello ${firstName},
+          
+          We've detected multiple failed login attempts to your Trading Journal account. For your security, we've temporarily locked your account.
+          
+          Account Status: Locked
+          Lockout Duration: ${lockoutDuration} minute${lockoutDuration !== 1 ? 's' : ''}
+          Account will be unlocked at: ${lockedUntilTime} on ${lockedUntilDate}
+          
+          ${adminUnlockTextMessage}
+          
+          If you didn't attempt to log in recently, we recommend changing your password immediately once your account is unlocked.
+          
+          To reset your password once your account is unlocked, visit: ${frontendUrl}/forgot-password
+          
+          If you need immediate assistance, please contact our support team.
+          
+          Regards,
+          The Trading Journal Team
+          
+          This is an automated message. Please do not reply to this email.
+        `
+      });
+      console.log(`Account lockout notification email sent to ${email}`);
+    } catch (error) {
+      console.error('Error sending account lockout email:', error);
+      throw new Error('Failed to send account lockout email');
+    }
+  }
+
+  async sendAccountUnlockEmail(email: string, firstName: string): Promise<void> {
+    // In test mode, don't actually send emails
+    if (process.env.NODE_ENV === 'test') {
+      console.log('Test mode: Account unlock email would be sent to', email);
+      return;
+    }
+    
+    // Use environment variable or default frontend URL
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    
+    try {
+      await this.transporter.sendMail({
+        from: process.env.SMTP_FROM || 'Trading Journal <noreply@trading-journal.com>',
+        to: email,
+        subject: 'Your Account Has Been Unlocked',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+            <h2 style="color: #4caf50;">Account Unlocked</h2>
+            <p>Hello ${firstName},</p>
+            <p>Your Trading Journal account has been unlocked by an administrator. You can now log in to your account.</p>
+            <p>If you believe this was done in error or have any questions, please contact support.</p>
+            <p>You can login to your account at <a href="${frontendUrl}/login">${frontendUrl}/login</a></p>
+            <p style="margin-top: 30px;">Regards,<br>The Trading Journal Team</p>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #777;">
+              <p>This is an automated message. Please do not reply to this email.</p>
+            </div>
+          </div>
+        `,
+        text: `
+          Account Unlocked
+          
+          Hello ${firstName},
+          
+          Your Trading Journal account has been unlocked by an administrator. You can now log in to your account.
+          
+          If you believe this was done in error or have any questions, please contact support.
+          
+          You can login to your account at ${frontendUrl}/login
+          
+          Regards,
+          The Trading Journal Team
+          
+          This is an automated message. Please do not reply to this email.
+        `
+      });
+      console.log(`Account unlock notification email sent to ${email}`);
+    } catch (error) {
+      console.error('Error sending account unlock email:', error);
+      throw new Error('Failed to send account unlock email');
     }
   }
 }

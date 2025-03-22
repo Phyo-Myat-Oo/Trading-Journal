@@ -4,6 +4,7 @@ import tradeRoutes from './tradeRoutes';
 import analysisRoutes from './analysisRoutes';
 import accountRoutes from './accountRoutes';
 import journalRoutes from './journalRoutes';
+import adminRoutes from './adminRoutes';
 import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -16,5 +17,8 @@ router.use('/api/trades', authenticate, tradeRoutes);
 router.use('/api/analysis', authenticate, analysisRoutes);
 router.use('/api/accounts', authenticate, accountRoutes);
 router.use('/api/journal', authenticate, journalRoutes);
+
+// Admin routes - authentication is handled in adminRoutes
+router.use('/api/admin', adminRoutes);
 
 export default router; 

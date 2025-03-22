@@ -1,12 +1,15 @@
-import { register, login, requestPasswordReset, resetPassword, refreshToken, logout, checkCookies, verifyEmail, resendVerification, checkPermission } from '../controllers/authController';
+import { register, login, requestPasswordReset, resetPassword, refreshToken, logout, checkCookies, verifyEmail, resendVerification, getUserSessions, revokeSession } from '../controllers/authController';
 import { validateRequest } from '../middleware/validateRequest';
-import { loginSchema, registerSchema, resetPasswordSchema, forgotPasswordSchema, updatePasswordSchema } from '../schemas/authSchema';
+import { loginSchema, registerSchema, forgotPasswordSchema, updatePasswordSchema } from '../schemas/authSchema';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { emailService } from '../utils/emailService';
 import { Router } from 'express';
 import { authenticate } from '../middleware/authMiddleware';
 import { Request, Response } from 'express';
-import nodemailer from 'nodemailer';
+import { User, IUser } from '../models/User';
+import { logAdminActivity } from '../controllers/adminController';
+import { AdminActionType } from '../models/AdminActivityLog';
+import mongoose from 'mongoose';
 
 const router = Router();
 
@@ -257,8 +260,50 @@ router.post('/refresh-token', asyncHandler(refreshToken));
 // Protected auth routes
 router.post('/logout', authenticate, asyncHandler(logout));
 
+/**
+ * @swagger
+ * /api/auth/sessions:
+ *   get:
+ *     summary: Get all active sessions for the current user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of active sessions
+ *       401:
+ *         description: Unauthorized - User not authenticated
+ */
+router.get('/sessions', authenticate, asyncHandler(getUserSessions));
+
+/**
+ * @swagger
+ * /api/auth/sessions/{sessionId}:
+ *   delete:
+ *     summary: Terminate a specific session
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The JTI of the session to terminate
+ *     responses:
+ *       200:
+ *         description: Session terminated successfully
+ *       401:
+ *         description: Unauthorized - User not authenticated
+ *       404:
+ *         description: Session not found or already terminated
+ */
+router.delete('/sessions/:sessionId', authenticate, asyncHandler(revokeSession));
+
 // Check user permissions for a resource
-router.post('/check-permission', authenticate, asyncHandler(checkPermission));
+// Temporarily commenting out until checkPermission is implemented
+// router.post('/check-permission', authenticate, asyncHandler(checkPermission));
 
 // Debug route to check all cookies
 router.get('/debug-cookies', (req, res) => {
@@ -402,25 +447,17 @@ if (process.env.NODE_ENV !== 'production') {
         JWT_SECRET: process.env.JWT_SECRET ? 'Set' : 'Not set'
       };
       
-      // Check if nodemailer can create a transport
-      let transportStatus;
+      // Check if we can create a transport
+      let transportStatus = "Transport check skipped";
+      
+      // Note: We're using emailService directly rather than creating a new transporter
       try {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: process.env.SMTP_PORT,
-          secure: process.env.SMTP_SECURE === 'true',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-          }
-        });
-        transportStatus = 'Transport created successfully';
-        
-        // Verify connection configuration
-        await transporter.verify();
-        transportStatus += ' - Connection verified';
+        // Just check if we can access the emailService
+        if (emailService) {
+          transportStatus = 'Email service available';
+        }
       } catch (error) {
-        transportStatus = `Error creating transport: ${error instanceof Error ? error.message : String(error)}`;
+        transportStatus = `Error checking email service: ${error instanceof Error ? error.message : String(error)}`;
       }
       
       res.json({ 
@@ -450,40 +487,156 @@ if (process.env.NODE_ENV !== 'production') {
       
       console.log('[SIMPLE-TEST] Sending simple test email to:', email);
       
-      // Create transporter directly to test
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      });
-      
-      // Send a very simple email
-      const info = await transporter.sendMail({
-        from: process.env.SMTP_FROM || 'noreply@tradingjournal.com',
-        to: email,
-        subject: 'Simple Test Email',
-        text: 'This is a simple test email to check if Gmail is delivering messages.'
-      });
-      
-      res.json({ 
-        message: 'Simple test email sent',
-        email,
-        messageId: info.messageId,
-        response: info.response
-      });
+      try {
+        // Send a test email using our emailService
+        await emailService.sendResetPasswordEmail(email, 'simple-test-token');
+        
+        res.json({ 
+          message: 'Simple test email sent',
+          email
+        });
+      } catch (error) {
+        console.error('[SIMPLE-TEST] Error sending test email:', error);
+        res.status(500).json({ 
+          message: 'Failed to send simple test email', 
+          error: error instanceof Error ? error.message : String(error),
+          errorDetails: error
+        });
+      }
     } catch (error) {
-      console.error('[SIMPLE-TEST] Error sending test email:', error);
+      console.error('[SIMPLE-TEST] Error in email test endpoint:', error);
       res.status(500).json({ 
-        message: 'Failed to send simple test email', 
-        error: error instanceof Error ? error.message : String(error),
-        errorDetails: error
+        message: 'Failed to process email test request', 
+        error: error instanceof Error ? error.message : String(error)
       });
     }
   }));
 }
+
+// Admin endpoint to unlock a user account
+/**
+ * @swagger
+ * /api/auth/unlock-account:
+ *   post:
+ *     summary: Unlock a locked user account (Admin only)
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - resetLockoutHistory
+ *             properties:
+ *               userId:
+ *                 type: string
+ *                 description: ID of the user to unlock
+ *               resetLockoutHistory:
+ *                 type: boolean
+ *                 description: Whether to reset the lockout history count (optional)
+ *                 default: false
+ *     responses:
+ *       200:
+ *         description: Account unlocked successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Account unlocked successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Only admins can unlock accounts
+ *       404:
+ *         description: User not found
+ */
+router.post('/unlock-account', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  try {
+    // Check if current user is an admin
+    const user = req.user as IUser & { _id: mongoose.Types.ObjectId };
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only administrators can unlock user accounts'
+      });
+    }
+
+    const { userId, resetLockoutHistory } = req.body;
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // Find the user account
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Reset account lockout fields
+    targetUser.failedLoginAttempts = 0;
+    targetUser.accountLocked = false;
+    targetUser.accountLockedUntil = undefined;
+    
+    // Check if we should reset the previous lockouts counter
+    if (resetLockoutHistory) {
+      // Save the current value for logging
+      const previousLockoutCount = targetUser.previousLockouts;
+      targetUser.previousLockouts = 0;
+      
+      // Log this as a separate action
+      await logAdminActivity(
+        new mongoose.Types.ObjectId(user._id.toString()),
+        AdminActionType.USER_LOCK_RESET,
+        `Reset lockout history for user ${targetUser.email} (${targetUser._id}). Previous count: ${previousLockoutCount}`,
+        req.ip || '127.0.0.1'
+      );
+    }
+    
+    await targetUser.save();
+
+    // Log the unlock action
+    await logAdminActivity(
+      new mongoose.Types.ObjectId(user._id.toString()),
+      AdminActionType.USER_UNLOCK,
+      `Unlocked account for user ${targetUser.email} (${targetUser._id})`,
+      req.ip || '127.0.0.1'
+    );
+
+    // Send notification to user that their account was unlocked by admin
+    try {
+      await emailService.sendAccountUnlockEmail(targetUser.email, targetUser.firstName);
+    } catch (emailError) {
+      console.error('Error sending account unlock notification:', emailError);
+      // Continue even if email sending fails
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account unlocked successfully'
+    });
+  } catch (error) {
+    console.error('Error unlocking account:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error unlocking account'
+    });
+  }
+}));
 
 export default router; 

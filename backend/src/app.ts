@@ -49,11 +49,11 @@ const app = express();
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? process.env.CORS_ORIGIN || true
-    : ['http://localhost:5173', 'http://127.0.0.1:5173'], // Vite default dev server ports
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'], // Add localhost:3000
   credentials: true, // Allow cookies to be sent with requests
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'X-Silent-Request'],
-  exposedHeaders: ['Content-Range', 'X-Total-Count', 'Set-Cookie']
+  exposedHeaders: ['Content-Range', 'X-Total-Count']
 }));
 
 // Security headers with Helmet
@@ -134,9 +134,10 @@ app.use(requestLogger);
 /**
  * Rate Limiting Configuration
  * 
- * Implements two levels of rate limiting:
+ * Implements three levels of rate limiting:
  * 1. Global rate limiting - Applies to all routes
  * 2. Authentication rate limiting - More strict, applies only to auth endpoints
+ * 3. Cookie check endpoint - Higher limit to allow for debugging
  * 
  * This helps prevent brute force attacks and API abuse
  */
@@ -172,6 +173,19 @@ if (process.env.NODE_ENV !== 'test') {
   });
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/forgot-password', authLimiter);
+  
+  // 3. Cookie check endpoint - higher limit for debugging
+  const cookieCheckLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute window
+    max: 30, // Allow 30 requests per minute
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      message: 'Too many cookie check requests, please try again later.'
+    }
+  });
+  app.use('/api/auth/check-cookies', cookieCheckLimiter);
 }
 
 /**

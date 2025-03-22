@@ -16,6 +16,10 @@ export interface IUser extends Document {
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
   passwordChangedAt?: Date;
+  failedLoginAttempts: number;
+  accountLocked: boolean;
+  accountLockedUntil?: Date;
+  previousLockouts: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -37,6 +41,10 @@ export interface IUser extends Document {
  * @property {Date} createdAt - Timestamp of user creation
  * @property {Date} updatedAt - Timestamp of last update
  * @property {Date} passwordChangedAt - Timestamp when password was last changed
+ * @property {number} failedLoginAttempts - Count of consecutive failed login attempts
+ * @property {boolean} accountLocked - Whether the account is currently locked
+ * @property {Date} accountLockedUntil - Timestamp when account lock expires
+ * @property {number} previousLockouts - Count of how many times the account has been locked previously
  */
 const userSchema = new Schema<IUser>(
   {
@@ -83,7 +91,20 @@ const userSchema = new Schema<IUser>(
     verificationToken: String,
     resetPasswordToken: String,
     resetPasswordExpires: Date,
-    passwordChangedAt: Date
+    passwordChangedAt: Date,
+    failedLoginAttempts: {
+      type: Number,
+      default: 0
+    },
+    accountLocked: {
+      type: Boolean,
+      default: false
+    },
+    accountLockedUntil: Date,
+    previousLockouts: {
+      type: Number,
+      default: 0
+    }
   },
   {
     timestamps: true,

@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
-import { User } from '../models/User';
+import { User, IUser } from '../models/User';
 import { z } from 'zod';
+import { logAdminActivity } from './adminController';
+import { AdminActionType } from '../models/AdminActivityLog';
+import mongoose from 'mongoose';
 
 // Validation schemas
 const updateUserSchema = z.object({
@@ -117,7 +120,8 @@ export const searchUsers = async (req: Request, res: Response) => {
     }
 
     // Check if user has admin role
-    if (req.user.role !== 'admin') {
+    const user = req.user as IUser;
+    if (user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden - Admin access required' });
     }
 
@@ -163,7 +167,8 @@ export const updateUserRole = async (req: Request, res: Response) => {
     }
 
     // Check if user has admin role
-    if (req.user.role !== 'admin') {
+    const user = req.user as IUser & { _id: mongoose.Types.ObjectId };
+    if (user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden - Admin access required' });
     }
 
@@ -175,20 +180,35 @@ export const updateUserRole = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid role. Must be "user" or "admin"' });
     }
 
-    // Find user and update role
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { role },
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!user) {
+    // Find user and get current role before update
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    const oldRole = targetUser.role;
+    
+    // Only update if role is changing
+    if (oldRole !== role) {
+      // Update the role
+      targetUser.role = role;
+      await targetUser.save();
+      
+      // Log the role change activity
+      await logAdminActivity(
+        user._id,
+        AdminActionType.ROLE_UPDATE,
+        `Changed user ${targetUser.email} (${targetUser._id}) role from ${oldRole} to ${role}`,
+        req.ip || '127.0.0.1'
+      );
+    }
+
+    // Return updated user without password
+    const updatedUser = await User.findById(userId).select('-password');
+
     res.json({
       message: 'User role updated successfully',
-      user
+      user: updatedUser
     });
   } catch (error) {
     console.error('Update user role error:', error);

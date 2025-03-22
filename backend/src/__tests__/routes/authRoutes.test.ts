@@ -143,4 +143,114 @@ describe('Auth Routes', () => {
       expect(lastResponse.body.message).toContain('Too many');
     });
   });
+
+  describe('Account Lockout', () => {
+    it('should lock account after multiple failed login attempts', async () => {
+      // Create a test user that we can try to lock
+      const testUser = await User.create({
+        email: 'lockout-test@example.com',
+        password: 'secure-password-123',
+        firstName: 'Lockout',
+        lastName: 'Test',
+        isVerified: true
+      });
+
+      // Try incorrect password 5 times
+      for (let i = 0; i < 5; i++) {
+        await request(app)
+          .post('/api/auth/login')
+          .send({
+            email: 'lockout-test@example.com',
+            password: 'wrong-password'
+          })
+          .expect(HttpStatus.UNAUTHORIZED)
+          .expect((res) => {
+            expect(res.body.message).toBe('Invalid credentials');
+          });
+      }
+
+      // The 6th attempt should result in account lockout
+      const lockoutResponse = await request(app)
+        .post('/api/auth/login')
+        .send({
+          email: 'lockout-test@example.com',
+          password: 'wrong-password'
+        })
+        .expect(HttpStatus.UNAUTHORIZED);
+      
+      expect(lockoutResponse.body.isLocked).toBe(true);
+      expect(lockoutResponse.body.message).toContain('Account locked');
+
+      // Verify the user is actually locked in the database
+      const lockedUser = await User.findById(testUser._id);
+      expect(lockedUser).not.toBeNull();
+      expect(lockedUser!.accountLocked).toBe(true);
+      expect(lockedUser!.failedLoginAttempts).toBe(5);
+      expect(lockedUser!.accountLockedUntil).toBeDefined();
+
+      // Cleanup - remove test user
+      await User.findByIdAndDelete(testUser._id);
+    });
+
+    it('should reject login attempts during lockout period', async () => {
+      // Create a test user with an active lockout
+      const lockoutDate = new Date();
+      lockoutDate.setMinutes(lockoutDate.getMinutes() + 15); // 15 minutes lockout
+      
+      const testUser = await User.create({
+        email: 'already-locked@example.com',
+        password: 'secure-password-123',
+        firstName: 'Already',
+        lastName: 'Locked',
+        isVerified: true,
+        failedLoginAttempts: 5,
+        accountLocked: true,
+        accountLockedUntil: lockoutDate
+      });
+
+      // Try to login with correct password while locked
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({
+          email: 'already-locked@example.com',
+          password: 'secure-password-123'
+        })
+        .expect(HttpStatus.UNAUTHORIZED);
+      
+      expect(response.body.isLocked).toBe(true);
+      expect(response.body.message).toContain('Account is locked');
+
+      // Cleanup - remove test user
+      await User.findByIdAndDelete(testUser._id);
+    });
+
+    it('should reset failed attempts counter after successful login', async () => {
+      // Create a test user with some failed attempts but not locked
+      const testUser = await User.create({
+        email: 'almost-locked@example.com',
+        password: 'secure-password-123',
+        firstName: 'Almost',
+        lastName: 'Locked',
+        isVerified: true,
+        failedLoginAttempts: 3 // Just below threshold
+      });
+
+      // Login successfully
+      await request(app)
+        .post('/api/auth/login')
+        .send({
+          email: 'almost-locked@example.com',
+          password: 'secure-password-123'
+        })
+        .expect(HttpStatus.OK);
+
+      // Verify failed attempts counter is reset
+      const updatedUser = await User.findById(testUser._id);
+      expect(updatedUser).not.toBeNull();
+      expect(updatedUser!.failedLoginAttempts).toBe(0);
+
+      // Cleanup - remove test user
+      await User.findByIdAndDelete(testUser._id);
+    });
+  });
 }); 

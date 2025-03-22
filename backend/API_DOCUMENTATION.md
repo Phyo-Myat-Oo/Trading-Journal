@@ -720,6 +720,159 @@ PUT /users/profile
 }
 ```
 
+## Admin Features
+
+The Trading Journal includes advanced administration capabilities for system management, user administration, and security monitoring.
+
+### Admin Dashboard Statistics
+
+```
+GET /api/admin/stats
+```
+
+**Response:**
+```json
+{
+  "totalUsers": 125,
+  "activeUsers": 87,
+  "lockedAccounts": 3,
+  "totalTrades": 5431,
+  "tradesThisMonth": 342,
+  "systemUptime": "15d 7h 23m"
+}
+```
+
+### User Management
+
+#### Get Locked User Accounts
+
+```
+GET /api/admin/locked-accounts
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "users": [
+    {
+      "_id": "60d5f8b8c9e4c62b3fc7c9e8",
+      "email": "user@example.com",
+      "firstName": "John",
+      "lastName": "Doe",
+      "failedLoginAttempts": 5,
+      "accountLocked": true,
+      "accountLockedUntil": "2023-09-15T14:30:00Z",
+      "previousLockouts": 2,
+      "lastLogin": "2023-09-14T10:15:00Z"
+    }
+  ]
+}
+```
+
+#### Update User Role
+
+```
+PUT /api/users/:userId/role
+```
+
+**Request Body:**
+```json
+{
+  "role": "admin"
+}
+```
+
+**Response:**
+```json
+{
+  "message": "User role updated successfully",
+  "user": {
+    "_id": "60d5f8b8c9e4c62b3fc7c9e8",
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "role": "admin"
+  }
+}
+```
+
+#### Unlock User Account
+
+```
+POST /api/auth/unlock-account
+```
+
+**Request Body:**
+```json
+{
+  "userId": "60d5f8b8c9e4c62b3fc7c9e8",
+  "resetLockoutHistory": true
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Account unlocked successfully"
+}
+```
+
+### Admin Activity Logs
+
+```
+GET /api/admin/activity-logs
+```
+
+**Query Parameters:**
+- `page` (optional) - Page number for pagination
+- `limit` (optional) - Number of items per page
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "id": "60d5f8b8c9e4c62b3fc7c9e8",
+      "userId": "60d5f8b8c9e4c62b3fc7c9e8",
+      "userName": "Admin User",
+      "action": "USER_UNLOCK",
+      "details": "Unlocked account for user john@example.com (60d5f8b8c9e4c62b3fc7c9e8)",
+      "timestamp": "2023-09-15T10:30:00Z",
+      "ipAddress": "192.168.1.1"
+    },
+    {
+      "id": "60d5f8b8c9e4c62b3fc7c9e9",
+      "userId": "60d5f8b8c9e4c62b3fc7c9e8",
+      "userName": "Admin User",
+      "action": "ROLE_UPDATE",
+      "details": "Changed user jane@example.com (60d5f8b8c9e4c62b3fc7c9e7) role from user to admin",
+      "timestamp": "2023-09-14T15:45:00Z",
+      "ipAddress": "192.168.1.1"
+    }
+  ],
+  "pagination": {
+    "total": 25,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 2
+  }
+}
+```
+
+### Admin Actions
+
+The system logs the following admin actions:
+
+- `USER_UNLOCK` - When an admin unlocks a user account
+- `USER_LOCK_RESET` - When an admin resets a user's lockout history
+- `ROLE_UPDATE` - When an admin changes a user's role
+- `USER_DELETE` - When an admin deletes a user account
+- `USER_CREATE` - When an admin creates a new user account
+- `USER_UPDATE` - When an admin updates a user's information
+- `SYSTEM_SETTING_UPDATE` - When an admin changes system settings
+
 ## Scheduled Jobs
 
 Configure and manage scheduled jobs for data processing.
@@ -826,5 +979,39 @@ When rate limit is exceeded, you'll receive:
     "status": 429,
     "retryAfter": 350 // seconds until next request is allowed
   }
+}
+```
+
+## Account Lockout
+
+For enhanced security, the API implements account lockout after multiple failed login attempts:
+
+- Accounts are locked after 5 consecutive failed login attempts
+- Progressive lockout durations:
+  - First lockout: 15 minutes
+  - Second lockout: 30 minutes
+  - Third and subsequent lockouts: 60 minutes
+- After the third lockout, accounts may require administrator intervention to unlock
+- Account owners are notified via email when their account is locked
+- The lockout history is maintained between successful logins
+
+When attempting to log into a locked account, you'll receive:
+
+```json
+{
+  "success": false,
+  "message": "Account is locked. Please try again in 15 minutes.",
+  "isLocked": true
+}
+```
+
+For accounts requiring administrator intervention:
+
+```json
+{
+  "success": false,
+  "message": "Account locked due to excessive failed login attempts. Please contact an administrator.",
+  "isLocked": true,
+  "requiresAdminUnlock": true
 }
 ``` 

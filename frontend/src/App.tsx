@@ -1,3 +1,4 @@
+import React, { useEffect, useState, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './providers/ToastProvider';
@@ -17,17 +18,10 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import tokenDebug from './utils/tokenDebug';
 import { RoleBasedRoute } from './components/common/auth/RoleBasedRoute';
+import authService from './services/authService';
 
 import './styles/dateSlider.css';
-
-// Initialize token debugging in development
-const isDev = import.meta.env.DEV;
-if (isDev) {
-  console.log('Initializing token debugging in development mode');
-  tokenDebug.setupTokenDebug();
-}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,7 +58,63 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-export default function App() {
+function App() {
+  const [initializing, setInitializing] = useState(true);
+  // Use a ref to track if the session check has been performed
+  const sessionCheckPerformed = useRef(false);
+
+  // Check session status on app initialization
+  useEffect(() => {
+    // Prevent duplicate session checks
+    if (sessionCheckPerformed.current) {
+      console.log('App: Session check already performed, skipping duplicate');
+      return;
+    }
+
+    const checkSession = async () => {
+      try {
+        sessionCheckPerformed.current = true;
+        console.log('App: Starting session check on initialization');
+        
+        // Only check if we have a user in localStorage
+        const user = localStorage.getItem('user');
+        if (user) {
+          console.log('App: User found in localStorage, checking session validity');
+          try {
+            const sessionValid = await authService.checkSessionStatus();
+            console.log('App: Session check result:', sessionValid);
+            
+            if (!sessionValid) {
+              console.log('App: Invalid session, clearing stale user data');
+              localStorage.removeItem('user');
+            }
+          } catch (error) {
+            console.error('App: Error checking session status:', error);
+            // Don't clear user data on network errors
+            // Let the auth context handle the error
+          }
+        } else {
+          console.log('App: No user found in localStorage, proceeding as unauthenticated');
+        }
+      } catch (error) {
+        console.error('App: Error initializing app:', error);
+      } finally {
+        setInitializing(false);
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  // Show a minimal loading indicator while checking session
+  if (initializing) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#1A1B1E]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme}>
@@ -106,3 +156,5 @@ export default function App() {
     </QueryClientProvider>
   );
 }
+
+export default App;

@@ -125,6 +125,45 @@ export const revokeAllUserTokens = async (userId: Types.ObjectId): Promise<numbe
   return RefreshToken.revokeAllUserTokens(userId);
 };
 
+// Get all active sessions for a user
+export const getUserActiveSessions = async (userId: Types.ObjectId): Promise<any[]> => {
+  try {
+    const sessions = await RefreshToken.find({
+      userId,
+      isRevoked: false,
+      expiresAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 });
+
+    return sessions.map(session => ({
+      id: session._id,
+      jti: session.jti,
+      userAgent: session.userAgent || 'Unknown device',
+      ipAddress: session.ipAddress || 'Unknown location',
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt
+    }));
+  } catch (error) {
+    console.error('Error fetching user sessions:', error);
+    return [];
+  }
+};
+
+// Revoke a specific session by its JTI
+export const revokeSession = async (jti: string, userId: Types.ObjectId): Promise<boolean> => {
+  try {
+    // Verify the token belongs to the user before revoking it (security check)
+    const session = await RefreshToken.findOne({ jti, userId });
+    if (!session) {
+      return false;
+    }
+    
+    return RefreshToken.revokeToken(jti);
+  } catch (error) {
+    console.error('Error revoking session:', error);
+    return false;
+  }
+};
+
 // Schedule a job to remove expired tokens (should be called during app initialization)
 export const scheduleTokenCleanup = (): NodeJS.Timeout => {
   console.log('Scheduling token cleanup job');

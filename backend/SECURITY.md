@@ -6,6 +6,12 @@ This document outlines the security measures implemented in the Trading Journal 
 - JWT-based authentication
 - Password hashing with bcrypt
 - Rate limiting for login attempts
+- Account lockout after multiple failed login attempts
+- Progressive lockout system:
+  - First lockout: 15 minutes
+  - Second lockout: 30 minutes
+  - Third+ lockout: 60 minutes with potential admin intervention
+- Security notifications for account lockout
 - Session management
 
 ## Data Validation and Sanitization
@@ -29,6 +35,7 @@ This document outlines the security measures implemented in the Trading Journal 
 ## Best Practices
 - Environment variables for sensitive data
 - Secure password reset flow
+- User account protection with automatic lockout
 - Regular dependency updates
 - Code linting and security checks
 
@@ -37,6 +44,20 @@ This document outlines the security measures implemented in the Trading Journal 
 - Error logging for suspicious activities
 - Request logging for audit trails
 - Rate limit breach notifications
+- Account lockout notifications
+- Administrative activity logging
+- Comprehensive admin dashboard for security monitoring
+
+## Administrative Security Controls
+
+The Trading Journal includes powerful administrative security controls:
+
+- **User Management**: Administrators can view, modify, and manage user accounts.
+- **Account Lockout Controls**: Admins can unlock accounts and reset lockout history for users who have been locked out.
+- **Progressive Lockout Management**: View accounts with multiple lockouts that may require special attention.
+- **Role-Based Access Control**: Assign and revoke admin privileges to ensure proper access control.
+- **Audit Logs**: All admin actions are logged with details of the action, admin user, timestamp, and IP address.
+- **System Statistics**: Admins can monitor system usage, locked accounts, and active users to identify potential issues.
 
 ## Regular Security Tasks
 

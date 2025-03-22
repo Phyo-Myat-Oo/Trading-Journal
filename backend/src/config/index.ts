@@ -30,6 +30,12 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('900000'), // 15 minutes
   RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('100'),
   
+  // Account Lockout
+  MAX_LOGIN_ATTEMPTS: z.string().transform(Number).default('5'),
+  ACCOUNT_LOCKOUT_DURATION: z.string().transform(Number).default('15'), // minutes
+  ACCOUNT_LOCKOUT_MULTIPLIER: z.string().transform(Number).default('2'), // for progressive lockouts
+  MAX_LOCKOUT_DURATION: z.string().transform(Number).default('60'), // minutes
+  
   // Frontend
   FRONTEND_URL: z.string().optional(),
   
@@ -80,6 +86,13 @@ export const config = {
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     maxRequests: envVars.RATE_LIMIT_MAX_REQUESTS,
+  },
+  
+  accountLockout: {
+    maxLoginAttempts: envVars.MAX_LOGIN_ATTEMPTS,
+    lockoutDuration: envVars.ACCOUNT_LOCKOUT_DURATION * 60 * 1000, // convert to milliseconds
+    lockoutMultiplier: envVars.ACCOUNT_LOCKOUT_MULTIPLIER,
+    maxLockoutDuration: envVars.MAX_LOCKOUT_DURATION * 60 * 1000, // convert to milliseconds
   },
   
   // Frontend URL for email links

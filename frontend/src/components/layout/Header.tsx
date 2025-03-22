@@ -14,17 +14,35 @@ export const Header: React.FC<HeaderProps> = ({
   onDateRangeChange,
   onMenuClick,
 }) => {
-  const { logout, user } = useAuth();
+  const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const desktopMenuRef = useRef<HTMLDivElement>(null);
 
   const handleLogout = async () => {
-    await logout();
-    setMobileMenuOpen(false);
-    setDesktopMenuOpen(false);
-    window.location.href = '/login';
+    // Prevent multiple clicks
+    if (isLoggingOut) {
+      console.log('Logout already in progress');
+      return;
+    }
+    
+    try {
+      setIsLoggingOut(true);
+      console.log('Header: Starting logout process');
+      await logout();
+      setMobileMenuOpen(false);
+      setDesktopMenuOpen(false);
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Error during logout:', error);
+    } finally {
+      // Reset after a delay to prevent rapid clicks
+      setTimeout(() => {
+        setIsLoggingOut(false);
+      }, 2000);
+    }
   };
 
   const toggleMobileMenu = () => {
@@ -101,9 +119,19 @@ export const Header: React.FC<HeaderProps> = ({
                 <button 
                   onClick={handleLogout}
                   className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-[#13151A] hover:text-white"
+                  disabled={isLoggingOut}
                 >
-                  <RiLogoutBoxLine className="mr-2" />
-                  Logout
+                  {isLoggingOut ? (
+                    <>
+                      <span className="mr-2 w-4 h-4 rounded-full border-2 border-t-transparent border-gray-300 animate-spin"></span>
+                      Logging out...
+                    </>
+                  ) : (
+                    <>
+                      <RiLogoutBoxLine className="mr-2" />
+                      Logout
+                    </>
+                  )}
                 </button>
               </div>
             )}
@@ -155,9 +183,19 @@ export const Header: React.FC<HeaderProps> = ({
                   <button 
                     onClick={handleLogout}
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-[#13151A] hover:text-white"
+                    disabled={isLoggingOut}
                   >
-                    <RiLogoutBoxLine className="mr-2" />
-                    Logout
+                    {isLoggingOut ? (
+                      <>
+                        <span className="mr-2 w-4 h-4 rounded-full border-2 border-t-transparent border-gray-300 animate-spin"></span>
+                        Logging out...
+                      </>
+                    ) : (
+                      <>
+                        <RiLogoutBoxLine className="mr-2" />
+                        Logout
+                      </>
+                    )}
                   </button>
                 </div>
               )}

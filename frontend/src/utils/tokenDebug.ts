@@ -10,6 +10,11 @@ import api from './api';
 // Check if we're in development mode
 const isDevelopment = import.meta.env.DEV === true;
 
+// Track last check time to prevent excessive requests
+let lastCheckTime = 0;
+// Minimum time between checks (2 minutes)
+const MIN_CHECK_INTERVAL = 120000;
+
 // Setup token debugging
 export const setupTokenDebug = (): void => {
   // Only run debugging in development mode
@@ -18,17 +23,31 @@ export const setupTokenDebug = (): void => {
     return;
   }
   
-  // Lower frequency of checks in any mode - from 10 seconds to 30 seconds
-  const checkInterval = 30000; // 30 seconds
+  console.log('[TokenDebug] Debug utility initialized with reduced frequency checks');
+  
+  // Greatly reduced frequency - check once every 2 minutes instead of every 30 seconds
+  const checkInterval = 120000; // 2 minutes
   
   // Check periodically for cookie and token state
   setInterval(() => {
+    const now = Date.now();
+    
+    // Skip this check if another check happened recently
+    // This prevents multiple components from causing too many requests
+    if (now - lastCheckTime < MIN_CHECK_INTERVAL) {
+      console.debug('[TokenDebug] Skipping check - too soon since last check');
+      return;
+    }
+    
+    // Update the last check time
+    lastCheckTime = now;
+    
     // Check cookies without logging them
     if (document.cookie) {
       console.debug('[TokenDebug] Cookies present');
     }
     
-    // Try to fetch the current auth state silently
+    // Try to fetch the current auth state silently - with reduced frequency
     api.get('/api/auth/check-cookies', { 
       withCredentials: true,
       // Add silent header to tell backend not to log
@@ -43,7 +62,15 @@ export const setupTokenDebug = (): void => {
         }
       })
       .catch(error => {
-        console.error('[TokenDebug] Auth state error:', error);
+        // Type guard for axios error
+        const axiosError = error as { response?: { status: number } };
+        
+        // Don't log 429 errors to reduce console noise
+        if (axiosError.response && axiosError.response.status === 429) {
+          console.debug('[TokenDebug] Rate limit hit, will try later');
+        } else {
+          console.error('[TokenDebug] Auth state error:', error);
+        }
       });
   }, checkInterval);
   
@@ -80,11 +107,27 @@ export const setupTokenDebug = (): void => {
 
 // Add a debugging endpoint to check auth state
 export const checkAuthState = async (): Promise<void> => {
+  const now = Date.now();
+  
+  // Prevent manual checks from happening too frequently
+  if (now - lastCheckTime < 5000) { // 5 second cooldown for manual checks
+    console.log('[TokenDebug] Please wait at least 5 seconds between manual checks');
+    return;
+  }
+  
+  lastCheckTime = now;
+  
   try {
     const response = await api.get('/api/auth/check-cookies', { withCredentials: true });
     console.log('[TokenDebug] Manual auth state check:', response.data);
-  } catch (error) {
-    console.error('[TokenDebug] Manual auth state check error:', error);
+  } catch (error: unknown) {
+    const axiosError = error as { response?: { status: number } };
+    
+    if (axiosError.response && axiosError.response.status === 429) {
+      console.error('[TokenDebug] Rate limit hit. Please wait a few minutes before trying again.');
+    } else {
+      console.error('[TokenDebug] Manual auth state check error:', error);
+    }
   }
 };
 

@@ -1,6 +1,6 @@
-import api from '../utils/api';
-import { jwtDecode } from 'jwt-decode';
 import axios from 'axios';
+import { jwtDecode, JwtPayload as JwtPayloadType } from 'jwt-decode';
+import api from '../utils/api';
 
 export interface RegisterData {
   email: string;
@@ -52,11 +52,30 @@ export interface User {
   role: 'user' | 'admin';
 }
 
+export interface SessionData {
+  id: string;
+  jti: string;
+  userAgent: string;
+  ipAddress: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 interface JwtPayload {
   id: string;
   exp: number;
   iat: number;
 }
+
+// Debug logging function that only logs in development
+const debugLog = (message: string, data?: unknown) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[Auth] ${message}`, data || '');
+  }
+};
+
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 // In-memory token storage (more secure than localStorage)
 let accessToken: string | null = null;
@@ -64,6 +83,18 @@ let accessToken: string | null = null;
 // For refreshing token semaphore - prevents multiple refresh requests
 let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
+
+// Debounce API calls
+const apiCallDebounce = {
+  refreshToken: {
+    lastCall: 0,
+    cooldown: 5000, // 5 seconds cooldown
+  },
+  checkSession: {
+    lastCall: 0,
+    cooldown: 1000, // 1 second cooldown
+  }
+};
 
 // Subscribe to token refresh
 const subscribeTokenRefresh = (callback: (token: string) => void) => {
@@ -75,6 +106,11 @@ const onTokenRefreshed = (newToken: string) => {
   refreshSubscribers.forEach(callback => callback(newToken));
   refreshSubscribers = [];
 };
+
+// Track if a logout is in progress
+let isLoggingOut = false;
+// Timeout to reset the logout state
+let logoutResetTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const register = async (userData: RegisterData): Promise<AuthResponse> => {
   console.log('Attempting registration with:', userData.email);
@@ -168,43 +204,79 @@ const login = async (userData: LoginData): Promise<AuthResponse> => {
 };
 
 const logout = async (): Promise<void> => {
+  // If already logging out, don't start another logout request
+  if (isLoggingOut) {
+    debugLog('Logout already in progress, ignoring duplicate request');
+    return;
+  }
+  
   try {
+    // Set logging out flag
+    isLoggingOut = true;
+    debugLog('Starting logout process');
+    
     // Call logout endpoint to clear the HTTP-only cookie
     await api.post('/api/auth/logout', {}, { withCredentials: true });
+    
+    debugLog('Logout API call completed successfully');
   } catch (error) {
     console.error('Error during logout:', error);
   } finally {
     // Clear local state regardless of server response
     accessToken = null;
     localStorage.removeItem('user');
+    
+    // Set a timeout to reset the logging out flag
+    // This prevents multiple logout calls in quick succession
+    if (logoutResetTimeout) {
+      clearTimeout(logoutResetTimeout);
+    }
+    
+    logoutResetTimeout = setTimeout(() => {
+      debugLog('Logout cooldown expired, can log out again');
+      isLoggingOut = false;
+      logoutResetTimeout = null;
+    }, 2000); // 2 second cooldown
   }
 };
 
 const refreshToken = async (): Promise<boolean> => {
+  // Apply debounce to prevent excessive calls
+  const now = Date.now();
+  if (now - apiCallDebounce.refreshToken.lastCall < apiCallDebounce.refreshToken.cooldown) {
+    debugLog('Token refresh debounced, too soon since last call');
+    return !!accessToken; // Return current token status
+  }
+  apiCallDebounce.refreshToken.lastCall = now;
+
   // If already refreshing, don't make another request
   if (isRefreshing) {
-    console.log('Another refresh already in progress, waiting for it to complete...');
+    debugLog('Another refresh already in progress, waiting for it to complete');
     return new Promise<boolean>((resolve) => {
-      subscribeTokenRefresh(() => {
-        console.log('Refresh completed by another request');
-        resolve(true);
-      });
+      // Add timeout to prevent hanging subscribers
+      const timeoutId = setTimeout(() => {
+        debugLog('Refresh subscriber timed out after 5 seconds');
+        // Remove from subscribers list to prevent memory leaks
+        refreshSubscribers = refreshSubscribers.filter(cb => cb !== resolveCallback);
+        resolve(false);
+      }, 5000);
+      
+      // Create a function we can reference for cleanup
+      const resolveCallback = (token: string) => {
+        clearTimeout(timeoutId);
+        resolve(!!token);
+      };
+      
+      subscribeTokenRefresh(resolveCallback);
     });
-  }
-  
-  // If there's no token at all, don't even try to refresh
-  if (!getToken()) {
-    console.log('No token to refresh');
-    return false;
   }
   
   isRefreshing = true;
   
   try {
-    console.log('Attempting to refresh token...');
+    debugLog('Attempting to refresh token');
     
     // Send request to refresh token endpoint
-    // The refresh token is in the HTTP-only cookie which is automatically included
     const response = await api.post<RefreshTokenResponse>(
       '/api/auth/refresh-token', 
       {}, 
@@ -213,34 +285,49 @@ const refreshToken = async (): Promise<boolean> => {
         headers: {
           'Cache-Control': 'no-cache'
         },
-        timeout: 8000 // 8 second timeout
+        timeout: 10000 // 10 second timeout
       }
     );
     
-    console.log('Token refresh response status:', response.status);
-    
     if (response.data && response.data.accessToken) {
-      console.log('New token received, length:', response.data.accessToken.length);
+      debugLog('Token refreshed successfully');
       accessToken = response.data.accessToken;
       onTokenRefreshed(response.data.accessToken);
-      console.log('Token refreshed successfully');
+      
+      // Make sure we still have the user data in localStorage
+      const user = getCurrentUser();
+      if (!user && accessToken) {
+        try {
+          // Try to get user data from the token
+          const decoded = jwtDecode<JwtPayloadType & { email?: string; role?: string }>(accessToken);
+          if (decoded && decoded.id) {
+            // Create minimal user object from token data
+            const minimalUser = {
+              id: decoded.id,
+              email: decoded.email || 'unknown@example.com',
+              firstName: 'Unknown', // Can be updated later
+              lastName: 'User',     // Can be updated later
+              role: decoded.role || 'user'
+            };
+            localStorage.setItem('user', JSON.stringify(minimalUser));
+            debugLog('Recreated minimal user data from token');
+          }
+        } catch (userRecoveryError) {
+          console.error('Failed to recover user data from token:', userRecoveryError);
+        }
+      }
+      
       return true;
     }
-    console.warn('No token received in refresh response');
+    
+    debugLog('No token received in refresh response');
+    // Notify subscribers with an empty token to unblock them
+    onTokenRefreshed('');
     return false;
-  } catch (error: unknown) {
+  } catch (error) {
     console.error('Error refreshing token:', error);
-    // Log more details about the error
-    if (axios.isAxiosError(error)) {
-      console.error('Axios error details:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message,
-        code: error.code
-      });
-    } else if (error instanceof Error) {
-      console.error('Error message:', error.message);
-    }
+    // Notify subscribers to unblock them
+    onTokenRefreshed('');
     return false;
   } finally {
     isRefreshing = false;
@@ -255,19 +342,7 @@ const getCurrentUser = (): User | null => {
   return null;
 };
 
-const getToken = (): string | null => {
-  return accessToken;
-};
-
-// Check if we're in development mode
-const isDevelopment = import.meta.env.DEV === true;
-
-// A safer console.debug that only logs in development
-const debugLog = (...args: unknown[]): void => {
-  if (isDevelopment) {
-    console.debug(...args);
-  }
-};
+const getToken = () => accessToken;
 
 // Check if token is expired
 const isTokenExpired = () => {
@@ -278,15 +353,20 @@ const isTokenExpired = () => {
   }
 
   try {
-    const decoded = jwtDecode<JwtPayload>(token);
+    const decoded = jwtDecode<JwtPayloadType>(token);
     const currentTime = Date.now() / 1000;
 
     // Get token expiry time from decoded JWT
     const expTime = decoded.exp || 0;
 
-    // Consider token expired if it's within 60 seconds of expiry
-    // This gives us a buffer to refresh before it actually expires
-    const isExpired = expTime < currentTime + 60;
+    // Standard strategy: consider token expired if it's within 2 minutes of expiry
+    // or if it has less than 1/3 of its lifetime remaining
+    const tokenLifetime = (decoded.exp || 0) - (decoded.iat || 0);
+    const timeElapsed = currentTime - (decoded.iat || 0);
+    const lifetimePercentUsed = timeElapsed / tokenLifetime;
+    
+    // Expire if less than 2 minutes remain OR we've used more than 2/3 of the lifetime
+    const isExpired = (expTime - currentTime < 120) || (lifetimePercentUsed > 0.67);
     
     // Only log detailed info in development
     if (isDevelopment && isExpired) {
@@ -312,7 +392,7 @@ const isTokenValid = (): boolean => {
   }
   
   try {
-    const decoded = jwtDecode<JwtPayload>(accessToken);
+    const decoded = jwtDecode<JwtPayloadType>(accessToken);
     const currentTime = Date.now() / 1000;
     
     const isValid = decoded.exp > currentTime;
@@ -409,20 +489,131 @@ const checkPermission = async (resource: string): Promise<{ allowed: boolean; me
   }
 };
 
+// Get all active user sessions
+const getUserSessions = async (): Promise<SessionData[]> => {
+  try {
+    const response = await api.get('/api/auth/sessions', { withCredentials: true });
+    return response.data.sessions || [];
+  } catch (error) {
+    console.error('Error fetching user sessions:', error);
+    return [];
+  }
+};
+
+// Terminate a specific session
+const terminateSession = async (sessionId: string): Promise<boolean> => {
+  try {
+    const response = await api.delete(`/api/auth/sessions/${sessionId}`, { withCredentials: true });
+    return response.data.success || false;
+  } catch (error) {
+    console.error('Error terminating session:', error);
+    return false;
+  }
+};
+
+/**
+ * Check if current session is valid and refresh token if needed
+ * @returns Promise that resolves to true if session is valid, false otherwise
+ */
+const checkSessionStatus = async (): Promise<boolean> => {
+  // Apply debounce to prevent excessive calls
+  const now = Date.now();
+  if (now - apiCallDebounce.checkSession.lastCall < apiCallDebounce.checkSession.cooldown) {
+    debugLog('Session check debounced, too soon since last call');
+    return !!accessToken; // Return current token status
+  }
+  apiCallDebounce.checkSession.lastCall = now;
+
+  // Check for cookies in browser
+  const cookieString = document.cookie;
+  debugLog(`Session Check - Cookies present: ${cookieString ? 'Yes' : 'No'}`);
+  
+  try {
+    // If we have a token and it's not expired, we're authenticated
+    if (accessToken && !isTokenExpired()) {
+      debugLog('Access token is valid, session is active');
+      return true;
+    }
+    
+    // If token is expired, try to refresh it
+    debugLog('Token expired or missing, attempting refresh');
+    const success = await refreshToken();
+    return success;
+  } catch (error) {
+    console.error('Error checking session status:', error);
+    return false;
+  }
+};
+
+// Auto-check session on page load
+(async () => {
+  // Only run in browser environment
+  if (typeof window === 'undefined') return;
+  
+  try {
+    // Only check session if there's a user in localStorage
+    const userInStorage = localStorage.getItem('user');
+    if (userInStorage) {
+      debugLog('User found in storage, checking session status');
+      await checkSessionStatus();
+    } else {
+      debugLog('No user in storage, skipping session check');
+    }
+  } catch (error) {
+    console.error('Error during automatic session check:', error);
+  }
+})();
+
+// Check cookie status - streamlined version
+const checkCookies = async (): Promise<{
+  cookies?: Record<string, string>,
+  hasRefreshToken?: boolean,
+  serverTime?: string,
+  environment?: string,
+  cookieSettings?: Record<string, unknown>,
+  error?: boolean,
+  status?: number,
+  message?: string
+}> => {
+  debugLog('Checking cookie status');
+  
+  try {
+    const response = await api.get('/api/auth/check-cookies', {
+      withCredentials: true
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Error checking cookies:', error);
+    if (axios.isAxiosError(error) && error.response) {
+      return {
+        error: true,
+        status: error.response.status,
+        message: error.response.data?.message || 'Error checking cookies'
+      };
+    }
+    return { error: true, message: 'Network error checking cookies' };
+  }
+};
+
+// Export all service methods
 const authService = {
-  register,
   login,
-  logout,
+  register,
   refreshToken,
-  getCurrentUser,
+  logout,
   getToken,
+  getCurrentUser,
   isTokenExpired,
-  isTokenValid,
   isAuthenticated,
+  checkPermission,
+  getUserSessions,
+  terminateSession,
   requestPasswordReset,
   resetPassword,
   subscribeTokenRefresh,
-  checkPermission
+  checkSessionStatus,
+  checkCookies
 };
 
 export default authService; 
