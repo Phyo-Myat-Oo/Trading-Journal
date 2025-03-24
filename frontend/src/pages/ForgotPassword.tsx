@@ -26,63 +26,24 @@ const ForgotPassword = () => {
     }
     
     setIsSubmitting(true);
-    
-    // Add timeout to ensure we don't get stuck in loading state
-    const timeoutId = setTimeout(() => {
-      console.log('Request timed out, showing success message anyway');
-      setIsSuccess(true);
-      setIsSubmitting(false);
-    }, 5000); // Show success after 5 seconds even if server doesn't respond
+    setFormError('');
     
     try {
       console.log('Submitting forgot password request for:', email);
       
-      // First try with the auth service
-      const response = await authService.requestPasswordReset({ email });
-      console.log('Forgot password response via authService:', response);
+      // Use forgotPassword method directly (which is also aliased as requestPasswordReset)
+      const response = await authService.forgotPassword({ email });
+      console.log('Forgot password response:', response);
       
-      // Now also try direct fetch as a backup
-      try {
-        console.log('Also trying direct fetch as backup...');
-        const directResponse = await fetch('http://localhost:3000/api/auth/forgot-password', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email }),
-        });
-        const directData = await directResponse.json();
-        console.log('Direct fetch response:', directData);
-      } catch (directErr) {
-        console.error('Direct fetch backup failed:', directErr);
-      }
-      
-      // Also try a simple test email
-      try {
-        console.log('Sending test email for comparison...');
-        const testResponse = await fetch('http://localhost:3000/api/auth/simple-test-email', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email }),
-        });
-        const testData = await testResponse.json();
-        console.log('Test email response:', testData);
-      } catch (testErr) {
-        console.error('Test email failed:', testErr);
-      }
-      
+      // Always show success even if email doesn't exist (for security reasons)
       setIsSuccess(true);
-      clearTimeout(timeoutId);
-    } catch (err: unknown) {
+    } catch (err) {
       console.error('Password reset request failed:', err);
-      // Even if user doesn't exist, we don't want to reveal this for security reasons
+      // For security reasons, don't reveal if the email exists or not
+      // Just show success message anyway
       setIsSuccess(true);
-      clearTimeout(timeoutId);
     } finally {
       setIsSubmitting(false);
-      clearTimeout(timeoutId); // Clear timeout if request completes
     }
   };
 
@@ -98,25 +59,18 @@ const ForgotPassword = () => {
     return (
       <div className="w-full max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
         <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Password Reset Email Sent</h2>
-        <div className="text-center mb-6">
-          <div className="text-green-600 mb-4">
-            <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <p className="text-gray-600 mb-4">
-            We've sent password reset instructions to: <br/>
-            <span className="font-bold">{email}</span>
-          </p>
-          <div className="bg-yellow-100 p-4 rounded-lg text-left mb-4">
-            <p className="text-yellow-800 font-medium mb-2">Important:</p>
-            <ul className="list-disc pl-5 text-yellow-800 text-sm">
-              <li>Check your spam/junk folder if you don't see the email in your inbox</li>
-              <li>It may take a few minutes for the email to arrive</li>
-              <li>The reset link will expire in 1 hour</li>
-            </ul>
-          </div>
-          <Link to="/login" className="text-blue-600 hover:text-blue-800">
+        <p className="text-center text-gray-600 mb-4">
+          If an account exists with the email <span className="font-semibold">{email}</span>, 
+          we've sent instructions to reset your password.
+        </p>
+        <p className="text-center text-gray-600 mb-6">
+          Please check your email inbox and spam folder.
+        </p>
+        <div className="text-center">
+          <Link 
+            to="/login" 
+            className="inline-block px-4 py-2 bg-blue-600 text-white font-semibold rounded hover:bg-blue-700 transition-colors"
+          >
             Return to Login
           </Link>
         </div>
@@ -125,58 +79,51 @@ const ForgotPassword = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Reset your password
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Enter your email address and we'll send you a link to reset your password.
-          </p>
+    <div className="w-full max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Reset Your Password</h2>
+      <p className="text-center text-gray-600 mb-6">
+        Enter your email address below and we'll send you instructions to reset your password.
+      </p>
+      
+      {formError && (
+        <div className="mb-4 p-3 bg-red-100 border-l-4 border-red-500 text-red-700">
+          <p>{formError}</p>
+        </div>
+      )}
+      
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label htmlFor="email" className="block text-gray-700 font-medium mb-2">
+            Email Address
+          </label>
+          <input
+            type="email"
+            id="email"
+            value={email}
+            onChange={handleEmailChange}
+            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="your.email@example.com"
+            required
+          />
         </div>
         
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm">
-            <div className="mb-4">
-              <label htmlFor="email" className="sr-only">Email address</label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={handleEmailChange}
-                className={`appearance-none rounded-md relative block w-full px-3 py-2 border ${
-                  formError ? 'border-red-300' : 'border-gray-300'
-                } placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                placeholder="Email address"
-              />
-              {formError && (
-                <p className="mt-1 text-sm text-red-600">{formError}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-                isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
-              }`}
-            >
-              {isSubmitting ? 'Sending...' : 'Send Reset Link'}
-            </button>
-          </div>
-          
-          <div className="text-center mt-4">
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              Back to login
-            </Link>
-          </div>
-        </form>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className={`w-full py-2 px-4 rounded-lg font-medium text-white ${
+            isSubmitting
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700'
+          }`}
+        >
+          {isSubmitting ? 'Sending Instructions...' : 'Send Reset Instructions'}
+        </button>
+      </form>
+      
+      <div className="mt-4 text-center">
+        <Link to="/login" className="text-blue-600 hover:text-blue-800">
+          Back to Login
+        </Link>
       </div>
     </div>
   );

@@ -281,6 +281,12 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
       { expiresIn: '1h' }
     );
 
+    // Store the JWT token directly in the user document
+    user.resetPasswordToken = resetToken;
+    // Set expiration to 1 hour from now (matches JWT expiration)
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save();
+
     // Send reset email (using same pattern as verification email)
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     console.log(`[requestPasswordReset] Using frontendUrl: ${frontendUrl}`);

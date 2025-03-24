@@ -135,6 +135,11 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Define a proper interface for errors with response property
+interface ErrorWithResponse extends Error {
+  response?: unknown;
+}
+
 // Response interceptor for handling auth errors and CSRF errors
 api.interceptors.response.use(
   response => response,
@@ -144,6 +149,20 @@ api.interceptors.response.use(
     // If there was no config (e.g., network error), just reject
     if (!originalRequest) {
       return Promise.reject(error);
+    }
+    
+    // Handle password reset and forgot password errors specially 
+    // to preserve error messages for user feedback
+    if (originalRequest.url?.includes('/api/auth/reset-password') || 
+        originalRequest.url?.includes('/api/auth/forgot-password')) {
+      
+      const errorMessage = error.response?.data?.message || 'Request failed';
+      debugLog(`Password related error (${originalRequest.url}):`, errorMessage);
+      
+      // Create a custom error with the server's message and add response info
+      const enhancedError = new Error(errorMessage) as ErrorWithResponse;
+      enhancedError.response = error.response;
+      return Promise.reject(enhancedError);
     }
     
     // Handle 401 errors (except for login/register which handle their own errors)
@@ -241,7 +260,14 @@ const isAuthenticationEndpoint = (url: string | undefined): boolean => {
   return (
     url.includes('/api/auth/login') ||
     url.includes('/api/auth/register') ||
-    url.includes('/api/auth/refresh-token')
+    url.includes('/api/auth/refresh-token') ||
+    url.includes('/api/auth/logout') ||
+    url.includes('/api/auth/verify-email') ||
+    url.includes('/api/auth/resend-verification') ||
+    url.includes('/api/auth/reset-password') ||
+    url.includes('/api/auth/forgot-password') ||
+    url.includes('/api/auth/2fa/verify') ||
+    url.includes('/api/auth/2fa/backup')
   );
 };
 

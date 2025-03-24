@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import authService from '../services/authService';
 
 const ResetPassword = () => {
   const { token } = useParams<{ token: string }>();
@@ -43,24 +44,49 @@ const ResetPassword = () => {
     setError('');
     
     console.log('Token from URL:', token);
+    console.log('Token length:', token.length);
     console.log('Attempting to reset password');
     
     try {
-      console.log('Making request to reset-password endpoint');
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ token, password }),
-      });
+      // First try decoding the token to check its structure
+      try {
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 3) {
+          console.warn('Token does not appear to be a valid JWT (should have 3 parts separated by dots)');
+        } else {
+          // Try to decode the payload (middle part)
+          const encodedPayload = tokenParts[1];
+          const decodedPayload = atob(encodedPayload.replace(/-/g, '+').replace(/_/g, '/'));
+          const payload = JSON.parse(decodedPayload);
+          console.log('Token payload:', {
+            ...payload,
+            // Don't log the full payload for security, just the properties we're interested in
+            id: payload.id,
+            exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'undefined',
+            iat: payload.iat ? new Date(payload.iat * 1000).toISOString() : 'undefined',
+          });
+          
+          // Check if token is expired
+          if (payload.exp) {
+            const expTime = payload.exp * 1000; // Convert to milliseconds
+            const currentTime = Date.now();
+            console.log('Token expires:', new Date(expTime).toISOString());
+            console.log('Current time:', new Date(currentTime).toISOString());
+            console.log('Token expired:', expTime < currentTime);
+          }
+        }
+      } catch (decodeErr) {
+        console.error('Error decoding token:', decodeErr);
+      }
       
-      console.log('Response status:', response.status);
-      const data = await response.json();
-      console.log('Response data:', data);
+      // Use authService instead of direct fetch
+      console.log('Using authService.resetPassword to reset password');
+      const response = await authService.resetPassword({ token, password });
       
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to reset password');
+      console.log('Password reset response:', response);
+      
+      if (response.success === false) {
+        throw new Error(response.message || 'Failed to reset password');
       }
       
       setIsSuccess(true);
@@ -73,6 +99,13 @@ const ResetPassword = () => {
       console.error('Error resetting password:', err);
       const message = err instanceof Error ? err.message : 'An error occurred';
       setError(message);
+      
+      // When error occurs, add a debug message with troubleshooting information
+      console.log('Password reset troubleshooting info:', {
+        tokenProvided: !!token,
+        tokenFormat: token ? 'JWT format' : 'unknown',
+        apiUrl: import.meta.env.VITE_API_URL,
+      });
     } finally {
       setIsSubmitting(false);
     }
