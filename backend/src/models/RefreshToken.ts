@@ -11,6 +11,10 @@ export interface IRefreshToken extends Document {
   updatedAt: Date;   // When the token was last updated
   userAgent?: string; // The user agent that created the token
   ipAddress?: string; // The IP address that created the token
+  familyId: string;   // ID to track tokens in the same family/chain
+  parentJti: string | null; // Links to the previous token in the chain
+  familyCreatedAt: Date; // When this token family was first created
+  rotationCounter: number; // Number of times tokens in this family have been rotated
 }
 
 // Define static methods interface
@@ -18,6 +22,7 @@ interface RefreshTokenModel extends Model<IRefreshToken> {
   revokeToken(jti: string): Promise<boolean>;
   revokeAllUserTokens(userId: Types.ObjectId): Promise<number>;
   removeExpiredTokens(): Promise<number>;
+  revokeTokenFamily(familyId: string): Promise<number>;
 }
 
 const refreshTokenSchema = new Schema<IRefreshToken>(
@@ -55,6 +60,27 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
     ipAddress: {
       type: String,
     },
+    familyId: {
+      type: String,
+      required: true,
+      index: true,
+      default: () => new Types.ObjectId().toString(), // Default to a new ObjectId
+    },
+    parentJti: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    familyCreatedAt: {
+      type: Date,
+      required: true,
+      index: true,
+      default: Date.now,
+    },
+    rotationCounter: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -63,6 +89,8 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
 
 // Index combination for quick lookups by userId and token status
 refreshTokenSchema.index({ userId: 1, isRevoked: 1, expiresAt: 1 });
+// Add new index for token family
+refreshTokenSchema.index({ userId: 1, familyId: 1 });
 
 // Add a method to revoke a token
 refreshTokenSchema.statics.revokeToken = async function(jti: string): Promise<boolean> {
@@ -77,6 +105,15 @@ refreshTokenSchema.statics.revokeToken = async function(jti: string): Promise<bo
 refreshTokenSchema.statics.revokeAllUserTokens = async function(userId: Types.ObjectId): Promise<number> {
   const result = await this.updateMany(
     { userId, isRevoked: false },
+    { isRevoked: true }
+  );
+  return result.modifiedCount;
+};
+
+// Add a method to revoke all tokens in a family
+refreshTokenSchema.statics.revokeTokenFamily = async function(familyId: string): Promise<number> {
+  const result = await this.updateMany(
+    { familyId, isRevoked: false },
     { isRevoked: true }
   );
   return result.modifiedCount;

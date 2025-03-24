@@ -1,0 +1,101 @@
+import { createBrowserRouter } from 'react-router-dom';
+import { Layout } from '../components/layout/Layout';
+import { Dashboard } from '../pages/Dashboard';
+import Stats from '../pages/Stats';
+import Calendar from '../pages/Calendar';
+import Trades from '../pages/Trades';
+import Journal from '../pages/Journal';
+import Help from '../pages/Help';
+import { Settings } from '../pages/Settings';
+import SecuritySettings from '../pages/SecuritySettings';
+import { Admin } from '../pages/Admin';
+import Login from '../pages/Login';
+import Register from '../pages/Register';
+import ForgotPassword from '../pages/ForgotPassword';
+import ResetPassword from '../pages/ResetPassword';
+import VerifyEmail from '../pages/VerifyEmail';
+import NotFound from '../pages/NotFound';
+import { RoleBasedRoute } from '../components/common/auth/RoleBasedRoute';
+import { ProtectedRoute } from '../components/common/auth/ProtectedRoute';
+import { TokenDebug } from '../components/debug/TokenDebug';
+
+export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: (
+      <ProtectedRoute>
+        <Layout />
+      </ProtectedRoute>
+    ),
+    children: [
+      {
+        index: true,
+        element: <Dashboard />
+      },
+      {
+        path: 'trades',
+        element: <Trades />
+      },
+      {
+        path: 'journal',
+        element: <Journal />
+      },
+      {
+        path: 'stats',
+        element: <Stats />
+      },
+      {
+        path: 'calendar',
+        element: <Calendar />
+      },
+      {
+        path: 'settings',
+        element: <Settings />
+      },
+      {
+        path: 'security',
+        element: <SecuritySettings />
+      },
+      {
+        path: 'help',
+        element: <Help />
+      },
+      {
+        path: 'admin',
+        element: (
+          <RoleBasedRoute allowedRoles={['admin']}>
+            <Admin />
+          </RoleBasedRoute>
+        )
+      },
+      {
+        path: '*',
+        element: <NotFound />
+      }
+    ]
+  },
+  {
+    path: '/login',
+    element: <Login />
+  },
+  {
+    path: '/register',
+    element: <Register />
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPassword />
+  },
+  {
+    path: '/reset-password/:token',
+    element: <ResetPassword />
+  },
+  {
+    path: '/verify-email/:token',
+    element: <VerifyEmail />
+  },
+  {
+    path: '/debug/token',
+    element: <TokenDebug />
+  }
+]); 

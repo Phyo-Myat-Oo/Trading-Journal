@@ -10,6 +10,9 @@ import { User, IUser } from '../models/User';
 import { logAdminActivity } from '../controllers/adminController';
 import { AdminActionType } from '../models/AdminActivityLog';
 import mongoose from 'mongoose';
+import { loginRateLimiter, passwordResetRateLimiter, registrationRateLimiter, tokenRefreshLimiter } from '../middleware/rateLimitMiddleware';
+import { csrfProtection, getCsrfToken } from '../middleware/csrfMiddleware';
+import { verifyTwoFactorLogin, verifyBackupCode } from '../controllers/twoFactorController';
 
 const router = Router();
 
@@ -80,7 +83,7 @@ const router = Router();
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/register', validateRequest(registerSchema), asyncHandler(register));
+router.post('/register', registrationRateLimiter, validateRequest(registerSchema), asyncHandler(register));
 
 /**
  * @swagger
@@ -133,7 +136,7 @@ router.post('/register', validateRequest(registerSchema), asyncHandler(register)
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/login', validateRequest(loginSchema), asyncHandler(login));
+router.post('/login', loginRateLimiter, validateRequest(loginSchema), asyncHandler(login));
 
 /**
  * @swagger
@@ -175,7 +178,7 @@ router.post('/login', validateRequest(loginSchema), asyncHandler(login));
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/forgot-password', validateRequest(forgotPasswordSchema), asyncHandler(requestPasswordReset));
+router.post('/forgot-password', passwordResetRateLimiter, validateRequest(forgotPasswordSchema), asyncHandler(requestPasswordReset));
 
 /**
  * @swagger
@@ -255,7 +258,12 @@ router.get('/test-cookie', (req, res) => {
 });
 
 // Refresh token
-router.post('/refresh-token', asyncHandler(refreshToken));
+router.post('/refresh-token', tokenRefreshLimiter, (req, res) => {
+  refreshToken(req, res).catch(error => {
+    console.error('Error in refresh token route:', error);
+    res.status(500).json({ message: 'Internal server error during token refresh' });
+  });
+});
 
 // Protected auth routes
 router.post('/logout', authenticate, asyncHandler(logout));
@@ -638,5 +646,23 @@ router.post('/unlock-account', authenticate, asyncHandler(async (req: Request, r
     });
   }
 }));
+
+/**
+ * Get CSRF token for sensitive operations
+ * @route GET /api/auth/csrf-token
+ */
+router.get('/csrf-token', csrfProtection, getCsrfToken);
+
+/**
+ * Verify 2FA token during login
+ * @route POST /api/auth/2fa/verify
+ */
+router.post('/2fa/verify', asyncHandler(verifyTwoFactorLogin));
+
+/**
+ * Verify backup code during login
+ * @route POST /api/auth/2fa/backup
+ */
+router.post('/2fa/backup', asyncHandler(verifyBackupCode));
 
 export default router; 

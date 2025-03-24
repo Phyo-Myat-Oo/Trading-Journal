@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 import {
     getScheduledJobs,
     getScheduledJobById,
@@ -12,7 +12,7 @@ import {
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticateToken);
+router.use(authenticate);
 
 // Get all scheduled jobs for the user
 router.get('/', getScheduledJobs);

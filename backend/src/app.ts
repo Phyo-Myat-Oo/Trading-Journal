@@ -20,6 +20,7 @@ import journalRoutes from './routes/journalRoutes';
 import statisticsRoutes from './routes/statisticsRoutes';
 import analysisRoutes from './routes/analysisRoutes';
 import scheduledJobsRoutes from './routes/scheduledJobsRoutes';
+import adminRoutes from './routes/adminRoutes';
 import { analysisScheduler } from './services/analysisScheduler';
 import { logger } from './utils/logger';
 import { queueService } from './services/QueueService';
@@ -27,6 +28,9 @@ import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import routes from './routes';
 import cookieParser from 'cookie-parser';
+import * as tokenService from './services/tokenService';
+import { apiRateLimiter } from './middleware/rateLimitMiddleware';
+import { csrfProtection, handleCsrfError } from './middleware/csrfMiddleware';
 
 // Load environment variables
 dotenv.config();
@@ -52,7 +56,14 @@ app.use(cors({
     : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'], // Add localhost:3000
   credentials: true, // Allow cookies to be sent with requests
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'X-Silent-Request'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Cache-Control', 
+    'X-Silent-Request',
+    'x-csrf-token'  // Add CSRF token header
+  ],
   exposedHeaders: ['Content-Range', 'X-Total-Count']
 }));
 
@@ -222,6 +233,7 @@ app.use('/api/journal', journalRoutes);
 app.use('/api/statistics', statisticsRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/scheduled-jobs', scheduledJobsRoutes);
+app.use('/api/admin', adminRoutes);
 
 /**
  * Error Handling Middleware
@@ -254,11 +266,22 @@ if (process.env.NODE_ENV === 'production') {
     .catch(err => logger.error('Failed to initialize queue service', err));
 }
 
+// Setup scheduled tasks
+const tokenCleanupJob = tokenService.scheduleTokenCleanup();
+const blacklistCleanupJob = tokenService.scheduleBlacklistCleanup();
+
 /**
  * Graceful Shutdown Handling
  * Properly handle termination signals
  */
 process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  
+  // Clear interval timers
+  clearInterval(tokenCleanupJob);
+  clearInterval(blacklistCleanupJob);
+  
+  // Close server and database connection
   logger.info('SIGTERM signal received. Closing HTTP server...');
   // Place any cleanup logic here (closing DB connections, etc.)
   process.exit(0);
@@ -283,5 +306,20 @@ process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled Promise Rejection', reason);
   process.exit(1);
 });
+
+// Apply general API rate limiter to all routes
+app.use('/api', apiRateLimiter);
+
+// Mount routes
+app.use('/api', routes);
+
+// Apply CSRF protection to sensitive routes
+app.use('/api/auth/reset-password', csrfProtection);
+app.use('/api/users/profile', csrfProtection);
+app.use('/api/users/password', csrfProtection);
+app.use('/api/users/delete-account', csrfProtection);
+
+// Add CSRF error handler
+app.use(handleCsrfError);
 
 export default app; 

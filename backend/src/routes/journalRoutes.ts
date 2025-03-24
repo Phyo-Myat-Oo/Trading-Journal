@@ -8,12 +8,12 @@ import {
   getJournalStatistics,
   getJournalPatterns
 } from '../controllers/journalController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticateToken);
+router.use(authenticate);
 
 // Journal entry CRUD routes
 router.post('/', createJournalEntry);

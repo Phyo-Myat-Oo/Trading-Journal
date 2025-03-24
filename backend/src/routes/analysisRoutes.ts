@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 import {
   getAnalysis,
   generateAnalysis,
@@ -79,8 +79,8 @@ const router = express.Router();
  *               description: End date of analysis period
  */
 
-// All routes require authentication
-router.use(authenticateToken);
+// Apply authentication middleware to all routes
+router.use(authenticate);
 
 // Basic analysis routes
 router.get('/summary', getAnalysisSummary);

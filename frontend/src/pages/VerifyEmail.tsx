@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Box, Card, Container, Text, Title, Group, Button, Loader, ThemeIcon, Stack } from '@mantine/core';
+import { RiCheckLine, RiErrorWarningLine, RiMailLine, RiArrowRightLine } from 'react-icons/ri';
 
 const VerifyEmail = () => {
   const { token = '' } = useParams();
@@ -12,10 +14,18 @@ const VerifyEmail = () => {
     success: false,
     message: 'Verifying your email...',
   });
+  const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
     const verifyEmail = async () => {
-      if (!token) return;
+      if (!token) {
+        setVerificationStatus({
+          success: false,
+          message: 'No verification token provided. Please check your email for the verification link.'
+        });
+        setIsVerifying(false);
+        return;
+      }
       
       setIsVerifying(true);
       
@@ -35,17 +45,29 @@ const VerifyEmail = () => {
             success: true,
             message: data.message || 'Your email has been verified successfully!'
           });
-          // Wait 3 seconds before redirecting to login
-          setTimeout(() => {
-            navigate('/login');
-          }, 3000);
+          
+          // Start countdown for automatic redirect
+          const countdownInterval = setInterval(() => {
+            setCountdown(prev => {
+              if (prev <= 1) {
+                clearInterval(countdownInterval);
+                navigate('/login');
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+          
+          // Clean up interval on unmount
+          return () => clearInterval(countdownInterval);
         } else {
           setVerificationStatus({
             success: false,
             message: data.message || 'Email verification failed. The link may be invalid or expired.'
           });
         }
-      } catch {
+      } catch (error) {
+        console.error('Error during email verification:', error);
         setVerificationStatus({
           success: false,
           message: 'An error occurred during verification. Please try again later.'
@@ -58,67 +80,126 @@ const VerifyEmail = () => {
     verifyEmail();
   }, [token, navigate]);
 
+  // Animation class for successful verification
+  const successAnimation = verificationStatus.success ? 'animate-bounce' : '';
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+    <Container size="sm" py="xl">
+      <Card p="xl" radius="md" withBorder shadow="sm">
+        <Stack align="center" gap="lg">
+          <Title order={2} ta="center" mb="md">
             Email Verification
-          </h2>
-        </div>
-        
-        <div className={`border-l-4 p-4 my-4 ${
-          isVerifying 
-            ? 'bg-blue-50 border-blue-400' 
-            : verificationStatus.success 
-              ? 'bg-green-50 border-green-400' 
-              : 'bg-red-50 border-red-400'
-        }`}>
-          <div className="flex">
-            <div className="flex-shrink-0">
-              {isVerifying ? (
-                <svg className="h-5 w-5 text-blue-400 animate-spin" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              ) : verificationStatus.success ? (
-                <svg className="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-              ) : (
-                <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-            <div className="ml-3">
-              <p className={`text-sm ${
-                isVerifying 
-                  ? 'text-blue-700' 
-                  : verificationStatus.success 
-                    ? 'text-green-700' 
-                    : 'text-red-700'
-              }`}>
-                {verificationStatus.message}
-              </p>
-              {verificationStatus.success && (
-                <p className="text-sm text-green-700 mt-2">
-                  You will be redirected to the login page shortly.
-                </p>
-              )}
-            </div>
-          </div>
+          </Title>
           
-          {!isVerifying && (
-            <div className="mt-4 text-center">
-              <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-                {verificationStatus.success ? 'Go to login' : 'Back to login'}
-              </Link>
-            </div>
+          {isVerifying ? (
+            <Stack align="center" gap="md">
+              <Loader size="lg" color="blue" />
+              <Text size="lg" fw={500}>
+                Verifying your email address...
+              </Text>
+              <Text size="sm" c="dimmed">
+                This will only take a moment
+              </Text>
+            </Stack>
+          ) : (
+            <Stack align="center" gap="lg">
+              {/* Status Icon */}
+              <div className={successAnimation}>
+                <ThemeIcon 
+                  size={80} 
+                  radius={40} 
+                  color={verificationStatus.success ? 'green' : 'red'}
+                >
+                  {verificationStatus.success ? (
+                    <RiCheckLine size={50} />
+                  ) : (
+                    <RiErrorWarningLine size={50} />
+                  )}
+                </ThemeIcon>
+              </div>
+              
+              {/* Status Message */}
+              <Text size="lg" fw={500} ta="center">
+                {verificationStatus.message}
+              </Text>
+              
+              {/* Next Steps for Success */}
+              {verificationStatus.success && (
+                <Box mt="md">
+                  <Text c="dimmed" size="sm" mb="sm" ta="center">
+                    You will be redirected to the login page in {countdown} seconds...
+                  </Text>
+                  
+                  <Stack mt="md" gap="sm">
+                    <Text fw={500}>What's next?</Text>
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Log in to your account</Text>
+                    </Group>
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Set up your trading profile</Text>
+                    </Group>
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Start tracking your trades</Text>
+                    </Group>
+                  </Stack>
+                </Box>
+              )}
+              
+              {/* Error Guidance */}
+              {!verificationStatus.success && (
+                <Box>
+                  <Text c="dimmed" size="sm" mb="md" ta="center">
+                    If you're having trouble with the verification link:
+                  </Text>
+                  <Stack gap="sm">
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Check if you're using the latest verification link</Text>
+                    </Group>
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Try requesting a new verification email</Text>
+                    </Group>
+                    <Group gap="xs" align="center">
+                      <ThemeIcon size="sm" radius="xl" color="blue" variant="light">
+                        <RiArrowRightLine size={12} />
+                      </ThemeIcon>
+                      <Text size="sm">Contact support if the problem persists</Text>
+                    </Group>
+                  </Stack>
+                </Box>
+              )}
+              
+              {/* Actions */}
+              <Group mt="lg" justify="center">
+                <Button component={Link} to="/login" leftSection={<RiMailLine size={16} />}>
+                  {verificationStatus.success ? "Go to Login" : "Back to Login"}
+                </Button>
+                
+                {!verificationStatus.success && (
+                  <Button component={Link} to="/register" variant="outline">
+                    Register Again
+                  </Button>
+                )}
+              </Group>
+            </Stack>
           )}
-        </div>
-      </div>
-    </div>
+        </Stack>
+      </Card>
+    </Container>
   );
 };
 

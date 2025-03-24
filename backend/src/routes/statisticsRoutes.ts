@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 import {
   getTradeStats,
   getSymbolPerformance,
@@ -13,7 +13,7 @@ import {
 const router = express.Router();
 
 // Apply authentication middleware to all statistics routes
-router.use(authenticateToken);
+router.use(authenticate);
 
 // Basic trade statistics
 router.get('/trade-stats', getTradeStats);

@@ -1,54 +1,82 @@
-# React + TypeScript + Vite
+# Trading Journal Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the frontend application for the Trading Journal platform, providing users with tools to track and analyze their trading activity.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **User Authentication**: Secure login/registration with JWT, including two-factor authentication and email verification
+- **Account Management**: Create and manage trading accounts with detailed transaction tracking
+- **Trading Journal**: Log and analyze trades with detailed entry/exit information
+- **Performance Analytics**: Visualize trading performance with charts and statistics
+- **Dynamic Token Management**: Intelligent session handling with adaptive token expiration
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
 
-## Expanding the ESLint configuration
+## Technology Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Framework**: React with TypeScript
+- **Build System**: Vite
+- **State Management**: React Context API
+- **UI Components**: Mantine v7
+- **Routing**: React Router v6
+- **HTTP Client**: Axios
+- **Charts**: Recharts
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+## Setup & Development
+
+### Prerequisites
+
+- Node.js 18.x or higher
+- npm 8.x or higher
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/trading-journal.git
+
+# Navigate to the frontend directory
+cd trading-journal/frontend
+
+# Install dependencies
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# Start the development server
+npm run dev
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+# Run tests
+npm test
+
+# Build for production
+npm run build
 ```
+
+## Documentation
+
+The application includes several additional documentation files:
+
+- [Email Verification System](./README-EMAIL-VERIFICATION.md) - Details about the email verification implementation
+- [Token Expiration Handling](./README-TOKEN-EXPIRATION.md) - Information about dynamic token expiration and session management
+
+## Environment Configuration
+
+Create a `.env` file with the following variables:
+
+```
+VITE_API_URL=http://localhost:3000
+VITE_APP_NAME=Trading Journal
+```
+
+## Contributing
+
+1. Follow the coding style and conventions used throughout the project
+2. Write tests for new features
+3. Make sure all tests pass before submitting a pull request
+4. Update documentation as needed
+
+## License
+
+[MIT](LICENSE)

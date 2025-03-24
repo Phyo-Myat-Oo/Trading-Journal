@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Tabs, Title, Container, Paper } from '@mantine/core';
 import { 
   RiUser3Line, 
@@ -7,9 +7,27 @@ import {
   RiSettings3Line 
 } from 'react-icons/ri';
 import { SessionsManagement } from '../components/settings/SessionsManagement';
+import AccountSecurity from '../components/security/AccountSecurity';
+import { useAuth } from '../contexts/AuthContext';
+import { useLocation } from 'react-router-dom';
+import EmailVerificationStatus from '../components/auth/EmailVerificationStatus';
+
+interface LocationState {
+  activeTab?: string;
+}
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<string | null>('account');
+  const { user } = useAuth();
+  const location = useLocation();
+  
+  useEffect(() => {
+    // Check if location state has an activeTab value
+    const state = location.state as LocationState;
+    if (state?.activeTab) {
+      setActiveTab(state.activeTab);
+    }
+  }, [location]);
 
   return (
     <Container size="xl" py="xl">
@@ -40,6 +58,15 @@ export function Settings() {
           <Tabs.Panel value="account" pt="md">
             <Paper p="md">
               <Title order={3} mb="md">Profile Settings</Title>
+              
+              {/* Email verification status */}
+              {user && (
+                <EmailVerificationStatus 
+                  email={user.email} 
+                  isVerified={user.isVerified || false} 
+                />
+              )}
+              
               {/* Profile settings form will go here */}
               <div className="text-gray-400">Profile settings functionality coming soon...</div>
             </Paper>
@@ -48,8 +75,7 @@ export function Settings() {
           <Tabs.Panel value="security" pt="md">
             <Paper p="md">
               <Title order={3} mb="md">Security Settings</Title>
-              {/* Security settings form will go here */}
-              <div className="text-gray-400">Security settings functionality coming soon...</div>
+              <AccountSecurity userId={user?.id} />
             </Paper>
           </Tabs.Panel>
 

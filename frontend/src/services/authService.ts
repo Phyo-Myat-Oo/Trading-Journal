@@ -1,6 +1,17 @@
 import axios from 'axios';
 import { jwtDecode, JwtPayload as JwtPayloadType } from 'jwt-decode';
 import api from '../utils/api';
+import {
+  createTokenFingerprint,
+  encryptData,
+  decryptData,
+  getTokenRemainingTime,
+  isTokenFingerprintValid,
+  checkOnlineStatus,
+  User
+} from '../utils/auth';
+import { TokenManager } from './TokenManager';
+import { TokenError, TokenErrorCode } from '../types/token';
 
 export interface RegisterData {
   email: string;
@@ -15,8 +26,8 @@ export interface LoginData {
 }
 
 export interface AuthResponse {
-  accessToken: string;
-  user: {
+  accessToken?: string;
+  user?: {
     id: string;
     email: string;
     firstName: string;
@@ -24,6 +35,9 @@ export interface AuthResponse {
     role: 'user' | 'admin';
   };
   message: string;
+  success?: boolean;
+  requireTwoFactor?: boolean;
+  userId?: string;
 }
 
 export interface RefreshTokenResponse {
@@ -42,15 +56,10 @@ export interface ResetPasswordData {
 
 export interface MessageResponse {
   message: string;
+  success?: boolean;
 }
 
-export interface User {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: 'user' | 'admin';
-}
+export type { User };
 
 export interface SessionData {
   id: string;
@@ -61,11 +70,16 @@ export interface SessionData {
   expiresAt: string;
 }
 
-interface JwtPayload {
+interface JwtPayload extends JwtPayloadType {
   id: string;
   exp: number;
   iat: number;
+  email?: string;
+  role?: string;
 }
+
+// Token fingerprint storage key
+const TOKEN_FINGERPRINT_KEY = 'authTokenFingerprint';
 
 // Debug logging function that only logs in development
 const debugLog = (message: string, data?: unknown) => {
@@ -84,17 +98,56 @@ let accessToken: string | null = null;
 let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
 
-// Debounce API calls
+// Initialization status
+let isInitializing = false;
+let isInitialized = false;
+
+// Debounce API calls - commented out as it's handled by TokenManager now
+/*
 const apiCallDebounce = {
   refreshToken: {
     lastCall: 0,
     cooldown: 5000, // 5 seconds cooldown
+    consecutiveFailures: 0, 
+    maxConsecutiveFailures: 5, // Circuit breaker threshold
+    backoffFactor: 1.5, // Exponential backoff factor
+    inCooldown: false, // Circuit breaker status
+    circuitBreakerResetTime: 60000, // 1 minute circuit breaker cooldown
+    circuitBreakerTimeout: null as number | null,
   },
   checkSession: {
     lastCall: 0,
     cooldown: 1000, // 1 second cooldown
   }
 };
+*/
+
+// Function to calculate dynamic cooldown based on consecutive failures
+// NOTE: Currently saved for future use
+/*
+const calculateDynamicCooldown = (baseDelay: number, failures: number, factor: number): number => {
+  if (failures <= 0) return baseDelay;
+  // Apply exponential backoff with maximum cap
+  return Math.min(baseDelay * Math.pow(factor, failures), 300000); // Max 5 minutes
+};
+*/
+
+// Reset circuit breaker after cooldown period
+// NOTE: Currently saved for future use
+/*
+const resetCircuitBreaker = () => {
+  if (apiCallDebounce.refreshToken.circuitBreakerTimeout) {
+    clearTimeout(apiCallDebounce.refreshToken.circuitBreakerTimeout);
+  }
+  
+  apiCallDebounce.refreshToken.circuitBreakerTimeout = window.setTimeout(() => {
+    debugLog('Circuit breaker reset after cooldown period');
+    apiCallDebounce.refreshToken.inCooldown = false;
+    apiCallDebounce.refreshToken.consecutiveFailures = 0;
+    apiCallDebounce.refreshToken.circuitBreakerTimeout = null;
+  }, apiCallDebounce.refreshToken.circuitBreakerResetTime);
+};
+*/
 
 // Subscribe to token refresh
 const subscribeTokenRefresh = (callback: (token: string) => void) => {
@@ -105,6 +158,32 @@ const subscribeTokenRefresh = (callback: (token: string) => void) => {
 const onTokenRefreshed = (newToken: string) => {
   refreshSubscribers.forEach(callback => callback(newToken));
   refreshSubscribers = [];
+};
+
+// Store token fingerprint in localStorage (not the actual token)
+const storeTokenFingerprint = (token: string) => {
+  try {
+    const fingerprint = createTokenFingerprint(token);
+    localStorage.setItem(TOKEN_FINGERPRINT_KEY, encryptData(JSON.stringify(fingerprint)));
+    debugLog('Token fingerprint stored in localStorage');
+  } catch (e) {
+    console.warn('Failed to store token fingerprint:', e);
+  }
+};
+
+// Get stored token fingerprint from localStorage
+const getStoredFingerprint = () => {
+  try {
+    const encryptedData = localStorage.getItem(TOKEN_FINGERPRINT_KEY);
+    if (!encryptedData) return null;
+    
+    const decrypted = decryptData(encryptedData);
+    return JSON.parse(decrypted);
+  } catch (e) {
+    console.warn('Failed to retrieve token fingerprint:', e);
+    localStorage.removeItem(TOKEN_FINGERPRINT_KEY);
+    return null;
+  }
 };
 
 // Track if a logout is in progress
@@ -129,6 +208,9 @@ const register = async (userData: RegisterData): Promise<AuthResponse> => {
       accessToken = response.data.accessToken;
       localStorage.setItem('user', JSON.stringify(response.data.user));
       console.log('Access token saved:', accessToken);
+      
+      // Store token fingerprint
+      storeTokenFingerprint(response.data.accessToken);
     }
     return response.data;
   } catch (error) {
@@ -153,6 +235,17 @@ const login = async (userData: LoginData): Promise<AuthResponse> => {
     console.log('Response data structure:', Object.keys(response.data));
     console.log('Full response data:', JSON.stringify(response.data, null, 2));
     
+    // Check if 2FA is required
+    if (response.data.requireTwoFactor) {
+      console.log('Two-factor authentication required');
+      return {
+        message: 'Two-factor authentication required',
+        requireTwoFactor: true,
+        userId: response.data.userId,
+        success: false
+      };
+    }
+    
     if (response.data && response.data.accessToken) {
       accessToken = response.data.accessToken;
       
@@ -164,6 +257,9 @@ const login = async (userData: LoginData): Promise<AuthResponse> => {
         
         localStorage.setItem('user', JSON.stringify(response.data.user));
         console.log('User info stored in localStorage', response.data.user);
+        
+        // Store token fingerprint for persistence
+        storeTokenFingerprint(response.data.accessToken);
       } else {
         console.error('Invalid user object in response:', response.data.user);
         throw new Error('Invalid user data received from server');
@@ -174,7 +270,8 @@ const login = async (userData: LoginData): Promise<AuthResponse> => {
       console.warn('No accessToken received from login response. Response:', JSON.stringify(response.data));
       throw new Error('No authentication token received');
     }
-    return response.data as AuthResponse;
+    
+    return { ...response.data, success: true };
   } catch (error) {
     console.error('Login error details:', error);
     
@@ -225,6 +322,7 @@ const logout = async (): Promise<void> => {
     // Clear local state regardless of server response
     accessToken = null;
     localStorage.removeItem('user');
+    localStorage.removeItem(TOKEN_FINGERPRINT_KEY);
     
     // Set a timeout to reset the logging out flag
     // This prevents multiple logout calls in quick succession
@@ -233,23 +331,17 @@ const logout = async (): Promise<void> => {
     }
     
     logoutResetTimeout = setTimeout(() => {
-      debugLog('Logout cooldown expired, can log out again');
       isLoggingOut = false;
-      logoutResetTimeout = null;
-    }, 2000); // 2 second cooldown
+    }, 2000);
   }
 };
 
+/**
+ * Refresh the access token using the refresh token stored in HTTP-only cookie
+ * This implementation now delegates to TokenManager for the actual refresh
+ */
 const refreshToken = async (): Promise<boolean> => {
-  // Apply debounce to prevent excessive calls
-  const now = Date.now();
-  if (now - apiCallDebounce.refreshToken.lastCall < apiCallDebounce.refreshToken.cooldown) {
-    debugLog('Token refresh debounced, too soon since last call');
-    return !!accessToken; // Return current token status
-  }
-  apiCallDebounce.refreshToken.lastCall = now;
-
-  // If already refreshing, don't make another request
+  // Check if already refreshing
   if (isRefreshing) {
     debugLog('Another refresh already in progress, waiting for it to complete');
     return new Promise<boolean>((resolve) => {
@@ -274,32 +366,28 @@ const refreshToken = async (): Promise<boolean> => {
   isRefreshing = true;
   
   try {
-    debugLog('Attempting to refresh token');
+    debugLog('Delegating token refresh to TokenManager');
     
-    // Send request to refresh token endpoint
-    const response = await api.post<RefreshTokenResponse>(
-      '/api/auth/refresh-token', 
-      {}, 
-      { 
-        withCredentials: true,
-        headers: {
-          'Cache-Control': 'no-cache'
-        },
-        timeout: 10000 // 10 second timeout
-      }
-    );
+    // Get TokenManager instance
+    const tokenManager = TokenManager.getInstance();
     
-    if (response.data && response.data.accessToken) {
-      debugLog('Token refreshed successfully');
-      accessToken = response.data.accessToken;
-      onTokenRefreshed(response.data.accessToken);
+    // Request token refresh from TokenManager
+    const token = await tokenManager.refreshToken('high');
+    
+    if (token) {
+      debugLog('Token refreshed successfully via TokenManager');
+      accessToken = token;
+      onTokenRefreshed(token);
+      
+      // Store token fingerprint for persistence
+      storeTokenFingerprint(token);
       
       // Make sure we still have the user data in localStorage
       const user = getCurrentUser();
       if (!user && accessToken) {
         try {
           // Try to get user data from the token
-          const decoded = jwtDecode<JwtPayloadType & { email?: string; role?: string }>(accessToken);
+          const decoded = jwtDecode<JwtPayload>(accessToken);
           if (decoded && decoded.id) {
             // Create minimal user object from token data
             const minimalUser = {
@@ -309,40 +397,147 @@ const refreshToken = async (): Promise<boolean> => {
               lastName: 'User',     // Can be updated later
               role: decoded.role || 'user'
             };
+            
+            // Save minimal user info to localStorage
             localStorage.setItem('user', JSON.stringify(minimalUser));
-            debugLog('Recreated minimal user data from token');
           }
-        } catch (userRecoveryError) {
-          console.error('Failed to recover user data from token:', userRecoveryError);
+        } catch (error) {
+          console.error('Failed to extract user data from token:', error);
         }
       }
       
       return true;
+    } else {
+      debugLog('TokenManager refresh did not return a token');
+      accessToken = null;
+      return false;
+    }
+  } catch (error) {
+    // Handle TokenManager errors
+    if (error instanceof TokenError) {
+      console.error(`Token refresh failed: ${error.message} (${error.code})`, error.context);
+      
+      // Handle specific error codes
+      if (error.code === TokenErrorCode.CIRCUIT_BREAKER_TRIPPED) {
+        debugLog('Circuit breaker tripped, refresh not attempted');
+      } else if (error.code === TokenErrorCode.NETWORK_ERROR) {
+        debugLog('Network error during refresh, will retry on network recovery');
+      }
+    } else {
+      console.error('Error refreshing token:', error);
     }
     
-    debugLog('No token received in refresh response');
-    // Notify subscribers with an empty token to unblock them
-    onTokenRefreshed('');
-    return false;
-  } catch (error) {
-    console.error('Error refreshing token:', error);
-    // Notify subscribers to unblock them
-    onTokenRefreshed('');
+    // Clear token if refresh failed but don't clear user yet
+    // We'll let the auth context decide whether to log out
+    accessToken = null;
+    
     return false;
   } finally {
     isRefreshing = false;
   }
 };
 
-const getCurrentUser = (): User | null => {
-  const userStr = localStorage.getItem('user');
-  if (userStr) {
-    return JSON.parse(userStr);
+/**
+ * Initialize auth state on application start
+ * This now properly initializes TokenManager
+ */
+const initializeAuth = async (): Promise<boolean> => {
+  if (isInitializing || isInitialized) {
+    debugLog(`Auth initialization already ${isInitializing ? 'in progress' : 'completed'}`);
+    return isAuthenticated();
   }
-  return null;
+  
+  isInitializing = true;
+  debugLog('Starting auth initialization');
+  
+  try {
+    // Get TokenManager instance
+    const tokenManager = TokenManager.getInstance();
+    
+    // Check for existing token
+    const existingToken = getToken();
+    
+    // If we have a token, validate it with TokenManager
+    if (existingToken) {
+      tokenManager.initializeToken(existingToken);
+      
+      // Check if token is valid according to TokenManager
+      if (tokenManager.isTokenValid()) {
+        debugLog('Found valid token, authentication successful');
+        isInitialized = true;
+        return true;
+      } else {
+        debugLog('Found expired token, attempting refresh');
+        const refreshSuccessful = await refreshToken();
+        isInitialized = true;
+        return refreshSuccessful;
+      }
+    }
+    
+    // No token in memory, check for token fingerprint
+    const fingerprint = getStoredFingerprint();
+    if (fingerprint && isTokenFingerprintValid(fingerprint)) {
+      debugLog('Found valid token fingerprint, attempting refresh');
+      const refreshSuccessful = await refreshToken();
+      isInitialized = true;
+      return refreshSuccessful;
+    }
+    
+    // No valid token or fingerprint
+    debugLog('No valid authentication found');
+    isInitialized = true;
+    return false;
+  } catch (error) {
+    console.error('Error during auth initialization:', error);
+    isInitialized = true;
+    return false;
+  } finally {
+    isInitializing = false;
+  }
 };
 
-const getToken = () => accessToken;
+const forgotPassword = async (data: ForgotPasswordData): Promise<MessageResponse> => {
+  const response = await api.post('/api/auth/forgot-password', data);
+  return response.data;
+};
+
+const requestPasswordReset = forgotPassword;
+
+const resetPassword = async (data: ResetPasswordData): Promise<MessageResponse> => {
+  const response = await api.post('/api/auth/reset-password', data);
+  return response.data;
+};
+
+const verifyEmail = async (token: string): Promise<MessageResponse> => {
+  const response = await api.post('/api/auth/verify-email', { token });
+  return response.data;
+};
+
+// Set the token (used for testing and token refresh)
+const setToken = (token: string | null) => {
+  accessToken = token;
+  if (token) {
+    storeTokenFingerprint(token);
+  } else {
+    localStorage.removeItem(TOKEN_FINGERPRINT_KEY);
+  }
+};
+
+// Get the current token
+const getToken = (): string | null => {
+  return accessToken;
+};
+
+const getCurrentUser = (): User | null => {
+  try {
+  const userStr = localStorage.getItem('user');
+    if (!userStr) return null;
+    return JSON.parse(userStr);
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return null;
+  }
+};
 
 // Check if token is expired
 const isTokenExpired = () => {
@@ -353,20 +548,35 @@ const isTokenExpired = () => {
   }
 
   try {
-    const decoded = jwtDecode<JwtPayloadType>(token);
+    const decoded = jwtDecode<JwtPayload>(token);
     const currentTime = Date.now() / 1000;
 
     // Get token expiry time from decoded JWT
-    const expTime = decoded.exp || 0;
+    const expTime = decoded.exp;
 
     // Standard strategy: consider token expired if it's within 2 minutes of expiry
     // or if it has less than 1/3 of its lifetime remaining
-    const tokenLifetime = (decoded.exp || 0) - (decoded.iat || 0);
+    const tokenLifetime = decoded.exp - (decoded.iat || 0);
     const timeElapsed = currentTime - (decoded.iat || 0);
     const lifetimePercentUsed = timeElapsed / tokenLifetime;
     
     // Expire if less than 2 minutes remain OR we've used more than 2/3 of the lifetime
-    const isExpired = (expTime - currentTime < 120) || (lifetimePercentUsed > 0.67);
+    // Add a grace period for offline scenarios
+    const isOffline = !checkOnlineStatus();
+    const gracePeriod = isOffline ? 3600 : 120; // 1 hour grace when offline, 2 minutes normally
+    
+    const isExpired = (expTime - currentTime < gracePeriod) || (!isOffline && lifetimePercentUsed > 0.67);
+    
+    // Store token expiry info in localStorage for persistence across page reloads
+    try {
+      localStorage.setItem('tokenExpiry', JSON.stringify({
+        exp: expTime,
+        lastChecked: currentTime,
+        isOffline
+      }));
+    } catch (e) {
+      console.warn('Failed to store token expiry info:', e);
+    }
     
     // Only log detailed info in development
     if (isDevelopment && isExpired) {
@@ -374,6 +584,8 @@ const isTokenExpired = () => {
         tokenExp: new Date(expTime * 1000).toISOString(),
         currentTime: new Date(currentTime * 1000).toISOString(),
         timeRemaining: Math.floor(expTime - currentTime),
+        isOffline,
+        gracePeriod,
         isExpired
       });
     }
@@ -381,6 +593,30 @@ const isTokenExpired = () => {
     return isExpired;
   } catch (error) {
     console.error('Error checking token expiration:', error);
+    
+    // If we can't decode the token, check localStorage as fallback
+    try {
+      const storedExpiry = localStorage.getItem('tokenExpiry');
+      if (storedExpiry) {
+        const { exp, lastChecked, isOffline } = JSON.parse(storedExpiry);
+        const currentTime = Date.now() / 1000;
+        const gracePeriod = isOffline ? 3600 : 120;
+        
+        // If we're offline, give an extended grace period
+        if (!checkOnlineStatus() && (exp - currentTime > -3600)) {
+          console.log('Offline mode: using extended token grace period');
+          return false;
+        }
+        
+        // If checked recently and token was valid, trust that
+        if (currentTime - lastChecked < 300 && exp - lastChecked > gracePeriod) {
+          return false;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to read token expiry info from localStorage:', e);
+    }
+    
     return true;
   }
 };
@@ -392,7 +628,7 @@ const isTokenValid = (): boolean => {
   }
   
   try {
-    const decoded = jwtDecode<JwtPayloadType>(accessToken);
+    const decoded = jwtDecode<JwtPayload>(accessToken);
     const currentTime = Date.now() / 1000;
     
     const isValid = decoded.exp > currentTime;
@@ -404,7 +640,7 @@ const isTokenValid = (): boolean => {
     
     return isValid;
   } catch (error) {
-    console.error('Error validating token:', error);
+    console.error('Error checking token validity:', error);
     return false;
   }
 };
@@ -413,48 +649,198 @@ const isAuthenticated = (): boolean => {
   return !!getToken() && isTokenValid();
 };
 
-// Request password reset email
-const requestPasswordReset = async (data: ForgotPasswordData): Promise<MessageResponse> => {
-  console.log('Requesting password reset for email:', data.email);
+const getTokenRemainingTimeMs = (): number => {
+  const token = getToken();
+  if (!token) return 0;
+  
   try {
-    // Log the full URL construction
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const endpoint = '/api/auth/forgot-password';
-    const fullUrl = `${baseUrl}${endpoint}`;
-    console.log('Full URL would be:', fullUrl);
-    console.log('API object baseURL:', api.defaults.baseURL);
-    console.log('Sending POST request to endpoint:', endpoint);
-    
-    const response = await api.post(endpoint, data, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    console.log('Password reset request successful:', response.data);
-    return response.data;
+    return getTokenRemainingTime(token);
   } catch (error) {
-    if (error instanceof Error) {
-      console.error('Password reset request error:', error.message);
-      console.error('Error details:', error);
-    } else {
-      console.error('Unknown password reset error:', error);
-    }
-    // Return a success message even on error to prevent email enumeration
-    return { message: 'Password reset email sent' };
+    console.error('Error getting token remaining time:', error);
+    return 0;
   }
 };
 
-// Reset password with token
-const resetPassword = async (data: ResetPasswordData): Promise<MessageResponse> => {
+/**
+ * Verify a TOTP code during 2FA login
+ */
+const verifyTwoFactorLogin = async (userId: string, code: string): Promise<AuthResponse> => {
+  // Input validation
+  if (!userId || !code) {
+    console.error('Missing required parameters for 2FA verification');
+    const error = new Error('Token and user ID are required');
+    // @ts-expect-error Adding custom property to Error
+    error.isValidationError = true;
+    throw error;
+  }
+  
+  // Format validation
+  if (!/^\d{6}$/.test(code)) {
+    console.error('Invalid 2FA code format');
+    const error = new Error('Verification code must be 6 digits');
+    // @ts-expect-error Adding custom property to Error
+    error.isValidationError = true;
+    throw error;
+  }
+  
   try {
-    const response = await api.post('/api/auth/reset-password', data, {
-      headers: {
-        'Content-Type': 'application/json'
+    // Add retry logic for network issues
+    const maxRetries = 2;
+    let currentTry = 0;
+    let lastError = null;
+    
+    while (currentTry <= maxRetries) {
+      try {
+        const response = await api.post(
+          '/api/auth/2fa/verify', 
+          { 
+            userId, 
+            token: code // Changed from 'code' to 'token' to match backend expectation
+          },
+          { 
+            withCredentials: true,
+            timeout: 10000 // 10 second timeout
+          }
+        );
+        
+        // If successful, handle the token and user info
+        if (response.data && response.data.accessToken) {
+          accessToken = response.data.accessToken;
+          
+          if (response.data.user) {
+            localStorage.setItem('user', JSON.stringify(response.data.user));
+          }
+          
+          // Store token fingerprint for persistence
+          storeTokenFingerprint(response.data.accessToken);
+        }
+        
+        return { ...response.data, success: true };
+      } catch (error) {
+        lastError = error;
+        // Only retry on network errors, not validation errors
+        if (
+          error instanceof Error && 
+          error.message.includes('Network Error') && 
+          checkOnlineStatus() && 
+          currentTry < maxRetries
+        ) {
+          currentTry++;
+          // Wait with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, currentTry)));
+          continue;
+        }
+        // For other errors or if we've exhausted retries, break out and throw
+        break;
       }
-    });
-    return response.data;
+    }
+    
+    // If we've exhausted retries or hit a non-retryable error, throw the last error
+    if (lastError) {
+      throw lastError;
+    }
+    
+    throw new Error('Failed to verify 2FA code after retries');
   } catch (error) {
-    console.error('Password reset error:', error);
+    console.error('Error verifying 2FA code:', error);
+    throw error;
+  }
+};
+
+/**
+ * Verify a backup code during 2FA login
+ */
+const verifyBackupCode = async (userId: string, backupCode: string): Promise<AuthResponse> => {
+  // Input validation
+  if (!userId || !backupCode) {
+    console.error('Missing required parameters for backup code verification');
+    const error = new Error('User ID and backup code are required');
+    // @ts-expect-error Adding custom property to Error
+    error.isValidationError = true;
+    throw error;
+  }
+  
+  // Format validation for backup code (alphanumeric, no special chars)
+  if (!/^[a-zA-Z0-9]+$/.test(backupCode)) {
+    console.error('Invalid backup code format');
+    const error = new Error('Backup code format is invalid');
+    // @ts-expect-error Adding custom property to Error
+    error.isValidationError = true;
+    throw error;
+  }
+  
+  try {
+    // Include timestamp to prevent replay attacks
+    const verificationTime = Date.now();
+    
+    const response = await api.post(
+      '/api/auth/2fa/backup', 
+      { 
+        userId, 
+        backupCode,
+        verificationTime,
+        // Include a client session ID for tracing
+        sessionId: localStorage.getItem('sessionId') || `session-${Date.now()}`
+      },
+      { 
+        withCredentials: true,
+        timeout: 10000 // 10 second timeout
+      }
+    );
+    
+    // If successful, handle the token and user info
+    if (response.data && response.data.accessToken) {
+      accessToken = response.data.accessToken;
+      
+      if (response.data.user) {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      
+      // Store token fingerprint for persistence
+      storeTokenFingerprint(response.data.accessToken);
+    }
+    
+    return { ...response.data, success: true };
+  } catch (error) {
+    console.error('Error verifying backup code:', error);
+    
+    // Convert error to a more user-friendly format when possible
+    if (error instanceof Error) {
+      // @ts-expect-error Checking custom property on Error
+      if (error.isValidationError) {
+        return {
+          success: false,
+          message: error.message
+        };
+      }
+      
+      // Axios error handling
+      // @ts-expect-error Checking for Axios error response
+      if (error.response) {
+        // @ts-expect-error Accessing Axios error status
+        const status = error.response.status;
+        // @ts-expect-error Accessing Axios error data
+        const message = error.response.data?.message || 'Failed to verify backup code';
+        
+        if (status === 400) {
+          return {
+            success: false,
+            message: message || 'Invalid backup code'
+          };
+        } else if (status === 404) {
+          return {
+            success: false,
+            message: 'User not found or session expired'
+          };
+        } else if (status === 401) {
+          return {
+            success: false,
+            message: 'Backup code is invalid or has already been used'
+          };
+        }
+      }
+    }
+    
     throw error;
   }
 };
@@ -489,131 +875,95 @@ const checkPermission = async (resource: string): Promise<{ allowed: boolean; me
   }
 };
 
-// Get all active user sessions
+/**
+ * Get user's active sessions
+ */
 const getUserSessions = async (): Promise<SessionData[]> => {
   try {
-    const response = await api.get('/api/auth/sessions', { withCredentials: true });
+    const response = await api.get('/api/auth/sessions', {
+      withCredentials: true
+    });
     return response.data.sessions || [];
   } catch (error) {
     console.error('Error fetching user sessions:', error);
-    return [];
-  }
-};
-
-// Terminate a specific session
-const terminateSession = async (sessionId: string): Promise<boolean> => {
-  try {
-    const response = await api.delete(`/api/auth/sessions/${sessionId}`, { withCredentials: true });
-    return response.data.success || false;
-  } catch (error) {
-    console.error('Error terminating session:', error);
-    return false;
+    throw error;
   }
 };
 
 /**
- * Check if current session is valid and refresh token if needed
- * @returns Promise that resolves to true if session is valid, false otherwise
+ * Terminate a specific session by its JTI
  */
-const checkSessionStatus = async (): Promise<boolean> => {
-  // Apply debounce to prevent excessive calls
-  const now = Date.now();
-  if (now - apiCallDebounce.checkSession.lastCall < apiCallDebounce.checkSession.cooldown) {
-    debugLog('Session check debounced, too soon since last call');
-    return !!accessToken; // Return current token status
-  }
-  apiCallDebounce.checkSession.lastCall = now;
-
-  // Check for cookies in browser
-  const cookieString = document.cookie;
-  debugLog(`Session Check - Cookies present: ${cookieString ? 'Yes' : 'No'}`);
-  
+const terminateSession = async (sessionJti: string): Promise<boolean> => {
   try {
-    // If we have a token and it's not expired, we're authenticated
-    if (accessToken && !isTokenExpired()) {
-      debugLog('Access token is valid, session is active');
-      return true;
-    }
-    
-    // If token is expired, try to refresh it
-    debugLog('Token expired or missing, attempting refresh');
-    const success = await refreshToken();
-    return success;
+    const response = await api.post('/api/auth/sessions/revoke', {
+      jti: sessionJti
+    }, {
+      withCredentials: true
+    });
+    return response.status === 200;
   } catch (error) {
-    console.error('Error checking session status:', error);
-    return false;
+    console.error('Error terminating session:', error);
+    throw error;
   }
 };
 
-// Auto-check session on page load
-(async () => {
-  // Only run in browser environment
-  if (typeof window === 'undefined') return;
-  
-  try {
-    // Only check session if there's a user in localStorage
-    const userInStorage = localStorage.getItem('user');
-    if (userInStorage) {
-      debugLog('User found in storage, checking session status');
-      await checkSessionStatus();
-    } else {
-      debugLog('No user in storage, skipping session check');
-    }
-  } catch (error) {
-    console.error('Error during automatic session check:', error);
-  }
-})();
+/**
+ * Response type for cookie check
+ */
+export interface CookieCheckResponse {
+  hasRefreshToken: boolean;
+  environment: string;
+  serverTime: string;
+  status: 'success' | 'error';
+  message?: string;
+}
 
-// Check cookie status - streamlined version
-const checkCookies = async (): Promise<{
-  cookies?: Record<string, string>,
-  hasRefreshToken?: boolean,
-  serverTime?: string,
-  environment?: string,
-  cookieSettings?: Record<string, unknown>,
-  error?: boolean,
-  status?: number,
-  message?: string
-}> => {
-  debugLog('Checking cookie status');
-  
+/**
+ * Check cookie status (for debugging)
+ */
+const checkCookies = async (): Promise<CookieCheckResponse> => {
   try {
-    const response = await api.get('/api/auth/check-cookies', {
+    // Set a test cookie first
+    document.cookie = "cookieTest=1; path=/;";
+    
+    // Make a request to check cookies
+    const response = await api.get<CookieCheckResponse>('/api/auth/check-cookies', {
       withCredentials: true
     });
-    
     return response.data;
   } catch (error) {
     console.error('Error checking cookies:', error);
-    if (axios.isAxiosError(error) && error.response) {
-      return {
-        error: true,
-        status: error.response.status,
-        message: error.response.data?.message || 'Error checking cookies'
-      };
-    }
-    return { error: true, message: 'Network error checking cookies' };
+    throw error;
   }
 };
 
-// Export all service methods
-const authService = {
-  login,
-  register,
-  refreshToken,
-  logout,
-  getToken,
-  getCurrentUser,
-  isTokenExpired,
-  isAuthenticated,
-  checkPermission,
-  getUserSessions,
-  terminateSession,
-  requestPasswordReset,
-  resetPassword,
-  subscribeTokenRefresh,
-  checkSessionStatus,
-  checkCookies
+const resendVerificationEmail = async (email: string): Promise<MessageResponse> => {
+  const response = await api.post('/api/auth/resend-verification', { email });
+  return response.data;
 };
 
-export default authService; 
+export default {
+  register,
+  login,
+  logout,
+  refreshToken,
+  forgotPassword,
+  requestPasswordReset,
+  resetPassword,
+  verifyEmail,
+  getToken,
+  setToken,
+  getCurrentUser,
+  isTokenExpired,
+  isTokenValid,
+  isAuthenticated,
+  verifyTwoFactorLogin,
+  verifyBackupCode,
+  checkPermission,
+  getTokenRemainingTimeMs,
+  initializeAuth,
+  getUserSessions,
+  terminateSession,
+  checkCookies,
+  resendVerificationEmail
+}; 

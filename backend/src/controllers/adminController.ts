@@ -194,4 +194,40 @@ export const getActivityLogs = async (req: Request, res: Response) => {
     console.error('Error getting admin activity logs:', error);
     res.status(500).json({ message: 'Error fetching admin activity logs' });
   }
+};
+
+/**
+ * Get token security events for monitoring
+ * @route GET /api/admin/token-security-events
+ * @access Admin only
+ */
+export const getTokenSecurityEvents = async (req: Request, res: Response) => {
+  try {
+    const { TokenEvent } = await import('../models/TokenEvent');
+    
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const skip = (page - 1) * limit;
+    
+    const events = await TokenEvent.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'email firstName lastName');
+      
+    const total = await TokenEvent.countDocuments();
+    
+    return res.status(200).json({
+      events,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching token security events:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
 }; 

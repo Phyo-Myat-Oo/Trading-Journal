@@ -2,11 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { AxiosError } from 'axios';
+import TwoFactorVerify from '../components/auth/TwoFactorVerify';
+import { AuthResponse } from '../services/authService';
+import EmailVerificationBanner from '../components/auth/EmailVerificationBanner';
+import authService from '../services/authService';
 
 const Login = () => {
   const navigate = useNavigate();
   const formRef = useRef<HTMLFormElement>(null);
-  const { login, error: authError } = useAuth();
+  const { login, error: authError, twoFactorRequired, twoFactorPendingUserId, cancelTwoFactor } = useAuth();
   const [error, setError] = useState('');
   const [formData, setFormData] = useState({
     email: '',
@@ -15,8 +19,23 @@ const Login = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationNeeded, setVerificationNeeded] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
+  // These state variables are used by the handleResendVerification function
+  // but their values are managed within the function and not directly referenced in JSX
   const [resendSuccess, setResendSuccess] = useState(false);
   const [resendError, setResendError] = useState('');
+  
+  // 2FA states
+  const [requireTwoFactor, setRequireTwoFactor] = useState(false);
+  const [tempUserId, setTempUserId] = useState('');
+  
+  // Check for existing 2FA verification state on mount
+  useEffect(() => {
+    if (twoFactorRequired && twoFactorPendingUserId) {
+      console.log('Found pending 2FA verification on component mount');
+      setRequireTwoFactor(true);
+      setTempUserId(twoFactorPendingUserId);
+    }
+  }, [twoFactorRequired, twoFactorPendingUserId]);
 
   // Sync with auth context errors
   useEffect(() => {
@@ -152,26 +171,33 @@ const Login = () => {
     }
     
     console.log('Form validation passed, starting login process');
-      setIsSubmitting(true);
+    setIsSubmitting(true);
     
     try {
       console.log('Attempting login for:', formData.email);
       console.log('API URL:', import.meta.env.VITE_API_URL);
       
       // Use the context login function which updates auth state and returns success/failure
-      const loginSuccess = await login({
-          email: formData.email,
-          password: formData.password
-        });
+      const loginResponse = await login({
+        email: formData.email,
+        password: formData.password
+      });
       
-      console.log('Login result:', loginSuccess ? 'success' : 'failed');
+      console.log('Login result:', loginResponse);
+      
+      // Check if 2FA is required
+      if (loginResponse && loginResponse.requireTwoFactor && loginResponse.userId) {
+        setRequireTwoFactor(true);
+        setTempUserId(loginResponse.userId);
+        return;
+      }
       
       // Only navigate on successful login
-      if (loginSuccess) {
+      if (loginResponse && loginResponse.success) {
         console.log('Login successful, navigating to home');
         // Use a small delay to ensure state is updated before redirect
         setTimeout(() => {
-        navigate('/');
+          navigate('/');
         }, 100);
       } else {
         console.log('Login failed, staying on login page');
@@ -181,7 +207,7 @@ const Login = () => {
           password: ''
         }));
       }
-      } catch (err) {
+    } catch (err) {
       console.error('%c LOGIN ERROR', 'background: #ff0000; color: white; font-size: 16px', err);
       
       // Clear only the password field on failed login attempts
@@ -213,9 +239,9 @@ const Login = () => {
         console.log('Login failed with error message:', errorMessage);
         setError(errorMessage);
       }
-      } finally {
+    } finally {
       console.log('Resetting submission state');
-        setIsSubmitting(false);
+      setIsSubmitting(false);
       console.log('%c BUTTON CLICK - END', 'background: blue; color: white; font-size: 16px');
       
       // Add a check to see if the component is still mounted
@@ -226,7 +252,10 @@ const Login = () => {
     }
   };
 
+  // Handle resending verification email
   const handleResendVerification = async () => {
+    if (resendingVerification) return;
+    
     setResendingVerification(true);
     setResendSuccess(false);
     setResendError('');
@@ -234,39 +263,82 @@ const Login = () => {
     try {
       console.log('Attempting to resend verification email to:', formData.email);
       
-      // Use the api instance here for consistency
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/resend-verification`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email: formData.email }),
-        credentials: 'include'
-      });
+      // Use the authService for better consistency with other API calls
+      const response = await authService.resendVerificationEmail(formData.email);
+      console.log('Resend verification response:', response);
       
-      const data = await response.json();
-      console.log('Resend verification response:', data);
-      
-      if (response.ok) {
+      if (response.success !== false) {
         setResendSuccess(true);
+        console.log(`Verification email sent to ${formData.email} successfully`);
       } else {
-        setResendError(data.message || 'Failed to resend verification email.');
+        const errorMsg = response.message || 'Failed to resend verification email.';
+        setResendError(errorMsg);
+        console.error('Resend verification error:', errorMsg);
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred. Please try again later.';
       console.error('Resend verification error:', err);
-      setResendError('An unexpected error occurred. Please try again later.');
+      setResendError(errorMsg);
     } finally {
       setResendingVerification(false);
     }
   };
 
+  // Handle successful 2FA verification
+  const handleTwoFactorSuccess = (response: AuthResponse) => {
+    console.log('2FA verification successful:', response);
+    
+    // Redirect to home page
+    setTimeout(() => {
+      navigate('/');
+    }, 100);
+  };
+  
+  // Handle 2FA verification cancellation
+  const handleTwoFactorCancel = () => {
+    setRequireTwoFactor(false);
+    setTempUserId('');
+    
+    // Also clear 2FA state in context
+    cancelTwoFactor();
+    
+    // Clear the password field
+    setFormData(prevData => ({
+      ...prevData,
+      password: ''
+    }));
+  };
+
+  // If 2FA verification is required, show the verification form
+  if (requireTwoFactor && tempUserId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+              Two-Factor Authentication Required
+            </h2>
+            <p className="mt-2 text-center text-sm text-gray-600">
+              Please enter the verification code from your authenticator app
+            </p>
+          </div>
+          
+          <TwoFactorVerify 
+            userId={tempUserId}
+            onVerificationSuccess={handleTwoFactorSuccess}
+            onCancel={handleTwoFactorCancel}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Main login form
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-lg shadow-md">
+        <div className="text-center">
+          <h2 className="text-3xl font-extrabold text-gray-900">Sign in to your account</h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             Or{' '}
             <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
@@ -275,63 +347,35 @@ const Login = () => {
           </p>
         </div>
         
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-red-700">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-        
         {verificationNeeded && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-yellow-700">Your email has not been verified. Please check your inbox for the verification link.</p>
-                {!resendSuccess && (
-                  <button
-                    type="button"
-                    onClick={handleResendVerification}
-                    disabled={resendingVerification}
-                    className="mt-2 inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-yellow-700 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
-                  >
-                    {resendingVerification ? 'Sending...' : 'Resend verification email'}
-                  </button>
-                )}
-                {resendSuccess && (
-                  <p className="mt-2 text-sm text-green-700">Verification email has been sent. Please check your inbox.</p>
-                )}
-                {resendError && (
-                  <p className="mt-2 text-sm text-red-700">{resendError}</p>
-                )}
-              </div>
-            </div>
+          <EmailVerificationBanner 
+            email={formData.email} 
+            onResend={handleResendVerification}
+            showBanner={true}
+          />
+        )}
+        
+        {/* Display general error messages (not related to verification) */}
+        {error && !verificationNeeded && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <span className="block sm:inline">{error}</span>
           </div>
         )}
         
-        <form 
-          ref={formRef}
-          className="mt-8 space-y-6 login-form" 
-          onSubmit={(e) => {
-            console.log('%c FORM SUBMIT EVENT', 'background: purple; color: white');
-            e.preventDefault();
-            e.stopPropagation();
-            // Don't do anything here - we'll handle submission from button click
-          }} 
-          noValidate
-        >
+        {/* Display verification-related success/error messages when not showing the banner */}
+        {!verificationNeeded && resendSuccess && (
+          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mt-4" role="alert">
+            <span className="block sm:inline">Verification email sent! Please check your inbox.</span>
+          </div>
+        )}
+        
+        {!verificationNeeded && resendError && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mt-4" role="alert">
+            <span className="block sm:inline">{resendError}</span>
+          </div>
+        )}
+        
+        <form className="mt-8 space-y-6" onSubmit={(e) => e.preventDefault()} ref={formRef}>
           <input type="hidden" name="remember" defaultValue="true" />
           <div className="rounded-md shadow-sm -space-y-px">
             <div>

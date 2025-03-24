@@ -10,12 +10,12 @@ import {
   transferBetweenAccounts,
   getBalanceHistory,
 } from '../controllers/accountController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticateToken);
+router.use(authenticate);
 
 // Account CRUD routes
 router.post('/', createAccount);

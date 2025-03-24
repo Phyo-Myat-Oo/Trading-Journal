@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { User, IUser } from '../models/User';
 import { Types } from 'mongoose';
 import { registerSchema, loginSchema, resetPasswordSchema, updatePasswordSchema } from '../schemas/authSchema';
@@ -8,7 +10,8 @@ import { z } from 'zod';
 import { config } from '../config';
 import { CookieOptions } from 'express';
 import * as tokenService from '../services/tokenService';
-import { RefreshToken } from '../models/RefreshToken';
+import { PasswordReset } from '../models/PasswordReset';
+import speakeasy from 'speakeasy';
 
 /**
  * Register a new user
@@ -191,6 +194,23 @@ export const login = async (req: Request, res: Response) => {
     user.accountLockedUntil = undefined;
     // Note: Don't reset previousLockouts - that's a permanent record
 
+    // Check if 2FA is enabled
+    if (user.twoFactorEnabled) {
+      // User has 2FA enabled, don't generate tokens yet
+      // Just update last login and return user info for 2FA step
+      user.lastLogin = new Date();
+      await user.save();
+      
+      return res.status(200).json({
+        message: 'Password verification successful, 2FA verification required',
+        requireTwoFactor: true,
+        userId: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName
+      });
+    }
+
     // Generate access token
     const accessToken = tokenService.generateAccessToken(user);
     
@@ -200,15 +220,13 @@ export const login = async (req: Request, res: Response) => {
     // Set refresh token in HTTP-only cookie
     const cookieOptions = {
       httpOnly: true,
-      secure: false, // Set to false in development for http://localhost
-      sameSite: 'lax', // Use 'lax' for all environments for better compatibility
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: expiresAt.getTime() - Date.now() // Use actual expiration time from token
     };
     
-    console.log(`Setting refreshToken cookie with options:`, JSON.stringify(cookieOptions, null, 2));
     res.cookie('refreshToken', refreshToken, cookieOptions as CookieOptions);
-    console.log(`Cookie set, refreshToken length: ${refreshToken.length}`);
 
     // Update last login
     user.lastLogin = new Date();
@@ -224,7 +242,8 @@ export const login = async (req: Request, res: Response) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        isVerified: user.isVerified
+        isVerified: user.isVerified,
+        twoFactorEnabled: user.twoFactorEnabled
       }
     });
   } catch (error) {
@@ -287,70 +306,50 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { token, password } = req.body;
-
-    console.log('[resetPassword] Attempting to reset password with token');
-    console.log('[resetPassword] Request body:', { token: token ? 'provided' : 'missing', passwordLength: password?.length });
+    // Validate input
+    const validatedData = updatePasswordSchema.parse(req.body);
+    const { token, password } = validatedData;
     
-    // Ensure we're using the correct validation schema
-    try {
-      updatePasswordSchema.parse(req.body);
-    } catch (validationError) {
-      console.error('[resetPassword] Validation error:', validationError);
-      return res.status(400).json({ 
-        message: 'Invalid input', 
-        errors: validationError instanceof z.ZodError ? validationError.errors : [] 
+    // Find user with the reset token
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() }
+    });
+    
+    if (!user) {
+      return res.status(400).json({ message: 'Password reset token is invalid or has expired' });
+    }
+    
+    // Check if the new password is in the password history
+    const isPasswordInHistory = await user.isPasswordInHistory(password);
+    if (isPasswordInHistory) {
+      return res.status(400).json({
+        message: 'New password cannot be the same as any of your recent passwords. Please choose a different password.'
       });
     }
     
-    // Verify token using same secret as when creating the token
-    let decoded;
+    // Set new password
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    
+    await user.save();
+    
+    // Send confirmation email
     try {
-      // IMPORTANT: Use the same secret that was used to generate the token
-      // in the requestPasswordReset function
-      const secret = process.env.JWT_SECRET || 'default_secret';
-      console.log('[resetPassword] Verifying token with secret key (secret length):', secret.length);
-      
-      decoded = jwt.verify(token, secret) as { id: string };
-      console.log('[resetPassword] Token verified successfully, decoded:', decoded);
-    } catch (tokenError) {
-      console.error('[resetPassword] Token verification failed:', tokenError);
-      return res.status(401).json({ message: 'Invalid or expired token' });
-    }
-
-    if (!decoded || !decoded.id) {
-      console.error('[resetPassword] Invalid token payload, missing id');
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-
-    // Find user
-    console.log('[resetPassword] Looking for user with ID:', decoded.id);
-    const user = await User.findById(decoded.id) as IUser & { _id: Types.ObjectId };
-    if (!user) {
-      console.error('[resetPassword] User not found for ID:', decoded.id);
-      return res.status(404).json({ message: 'User not found' });
+      await emailService.sendPasswordResetConfirmationEmail({
+        email: user.email,
+        firstName: user.firstName
+      });
+    } catch (emailError) {
+      console.error('Error sending password reset confirmation email:', emailError);
+      // Continue even if email fails (don't expose error to client)
     }
     
-    console.log('[resetPassword] User found:', user.email);
-
-    // Hash new password
-    try {
-      // Updating the password on the model will trigger the pre-save hook
-      // which will hash the password automatically
-      user.password = password;
-    await user.save();
-      console.log('[resetPassword] Password updated and saved successfully');
-    } catch (saveError) {
-      console.error('[resetPassword] Error saving new password:', saveError);
-      return res.status(500).json({ message: 'Error updating password' });
-    }
-
-    console.log('[resetPassword] Password reset successful for user:', user.email);
-
-    res.json({ message: 'Password reset successful' });
+    res.status(200).json({ message: 'Password has been reset successfully' });
   } catch (error) {
-    console.error('[resetPassword] Password reset error:', error);
-    res.status(500).json({ message: 'Error resetting password' });
+    console.error('Password reset error:', error);
+    res.status(500).json({ message: 'Server error during password reset' });
   }
 };
 
@@ -373,8 +372,48 @@ export const refreshToken = async (req: Request, res: Response) => {
     // Log token information (without revealing full token for security)
     console.log(`Refresh token found, length: ${refreshToken.length}, first 10 chars: ${refreshToken.substring(0, 10)}...`);
 
-    // Verify and validate refresh token
-    const { userId, jti, isValid } = await tokenService.verifyRefreshToken(refreshToken);
+    // Verify and validate refresh token with enhanced security checks
+    const { 
+      userId, 
+      jti, 
+      familyId, 
+      isValid, 
+      securityIssue, 
+      requiresFullAuth,
+      rotationCounter 
+    } = await tokenService.verifyRefreshToken(refreshToken);
+    
+    // Handle token security issues
+    if (securityIssue) {
+      // Clear the cookie - potential token theft
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/'
+      });
+      
+      return res.status(401).json({ 
+        message: 'Security issue detected. Please login again.',
+        code: 'SECURITY_ISSUE'
+      });
+    }
+    
+    // Handle expired family or excessive rotations
+    if (requiresFullAuth) {
+      // Clear the cookie - family too old or too many rotations
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/'
+      });
+      
+      return res.status(401).json({ 
+        message: 'Session expired. Please login again.',
+        code: 'SESSION_EXPIRED'
+      });
+    }
     
     if (!isValid) {
       console.log('Invalid or revoked refresh token');
@@ -391,20 +430,36 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Detect suspicious patterns (doesn't block but logs events)
+    await tokenService.detectSuspiciousPatterns(
+      userId, 
+      req.ip || req.connection.remoteAddress as string,
+      req.headers['user-agent'] as string
+    );
+
     // Revoke the current refresh token (one-time use)
     await tokenService.revokeRefreshToken(jti);
     
     // Generate new access token
     const newAccessToken = tokenService.generateAccessToken(user);
     
-    // Generate new refresh token
-    const { token: newRefreshToken, expiresAt } = await tokenService.generateRefreshToken(user, req);
+    // Generate new refresh token with family information
+    const { token: newRefreshToken, expiresAt } = await tokenService.generateRefreshToken(
+      user, 
+      req,
+      {
+        familyId,
+        parentJti: jti,
+        familyCreatedAt: new Date(),
+        rotationCounter: rotationCounter || 0
+      }
+    );
     
     // Set the new refresh token as a cookie
     const cookieOptions = {
       httpOnly: true,
-      secure: false, // Set to false in development for http://localhost
-      sameSite: 'lax', // Use 'lax' for all environments for better compatibility
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', 
       path: '/',
       maxAge: expiresAt.getTime() - Date.now() // Use actual expiration time from token
     };
@@ -422,54 +477,58 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Logout user - invalidates refresh token and blacklists access token
+ * @route POST /api/auth/logout
+ */
 export const logout = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
+    // Get the refresh token from cookie
+    const refreshToken = req.cookies?.refreshToken;
     
-    // Log the logout attempt for debugging purposes
-    console.log(`[${new Date().toISOString()}] Logout attempt from user ID: ${userId || 'unknown'}`);
-    
-    // Only try to revoke tokens if we have a user ID
-    if (userId) {
-      console.log(`Revoking tokens for user: ${userId}`);
-      
+    // If refresh token exists in cookie, revoke it
+    if (refreshToken) {
       try {
-        // Fetch user to check if they have refresh tokens
-        const user = await User.findById(userId);
+        // Extract the JTI and family ID from token
+        const decoded = jwt.verify(
+          refreshToken, 
+          config.jwt.refreshSecret as jwt.Secret
+        ) as { jti?: string; fid?: string };
         
-        // Check if user exists and has refresh tokens
-        if (user && user.refreshTokens && user.refreshTokens.length > 0) {
-          // Revoke all refresh tokens for the user to ensure complete logout
-          console.log(`User has ${user.refreshTokens.length} tokens to revoke`);
-          const result = await RefreshToken.deleteMany({ user: userId });
-          console.log(`Revoked all ${result.deletedCount} tokens for user ${userId}`);
-          
-          // Update the user document to clear the refreshTokens array
-          await User.findByIdAndUpdate(userId, { $set: { refreshTokens: [] } });
-        } else {
-          console.log(`User ${userId} has no tokens to revoke or user not found`);
+        if (decoded.fid) {
+          // Revoke the entire token family
+          await tokenService.revokeTokenFamily(decoded.fid, 'User logout');
+        } else if (decoded.jti) {
+          // Fallback to just revoking this token
+          await tokenService.revokeRefreshToken(decoded.jti);
         }
-      } catch (dbError) {
-        console.error('Database error during logout:', dbError);
-        // Continue with cookie clearing even if token revocation fails
+      } catch (error) {
+        // Token might be invalid, continue with logout anyway
+        console.error('Error invalidating refresh token during logout:', error);
       }
-    } else {
-      console.log('No user ID in request, unable to revoke refresh tokens');
     }
+
+    // Get the access token from the authorization header to blacklist it
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
     
-    // Clear the refresh token cookie regardless of token revocation
-    console.log('Clearing refresh token cookie');
+    if (accessToken) {
+      // Blacklist the access token
+      await tokenService.blacklistToken(accessToken, 'User logout');
+    }
+
+    // Clear the refresh token cookie
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/'
     });
-    
-    return res.status(200).json({ message: 'Logged out successfully' });
+
+    res.status(200).json({ message: 'Logged out successfully' });
   } catch (error) {
-    console.error('Error during logout:', error);
-    return res.status(500).json({ message: 'Error during logout' });
+    console.error('Logout error:', error);
+    res.status(500).json({ message: 'Server error during logout' });
   }
 };
 
@@ -667,6 +726,94 @@ export const revokeSession = async (req: Request, res: Response) => {
     res.status(500).json({ 
       success: false, 
       message: 'Error terminating session' 
+    });
+  }
+};
+
+export const verifyTwoFactorLogin = async (req: Request, res: Response) => {
+  try {
+    const { userId, code, verificationTime, sessionId } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User ID and verification code are required' 
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Verify 2FA is enabled
+    if (!user.twoFactorEnabled) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Two-factor authentication is not enabled for this account' 
+      });
+    }
+
+    // Verify the token
+    const isValid = speakeasy.totp.verify({
+      secret: user.twoFactorSecret || '',
+      encoding: 'base32',
+      token: code,
+      window: 1 // Allow tokens from 30 seconds before and after
+    });
+
+    if (!isValid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid verification code' 
+      });
+    }
+
+    // Generate access token
+    const accessToken = tokenService.generateAccessToken(user);
+    
+    // Generate refresh token
+    const { token: refreshToken, expiresAt } = await tokenService.generateRefreshToken(user, req);
+
+    // Set refresh token in HTTP-only cookie
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: expiresAt.getTime() - Date.now()
+    };
+    
+    res.cookie('refreshToken', refreshToken, cookieOptions as CookieOptions);
+
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Return success response with user data
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        isVerified: user.isVerified,
+        twoFactorEnabled: user.twoFactorEnabled
+      }
+    });
+  } catch (error) {
+    console.error('2FA verification error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during 2FA verification' 
     });
   }
 };

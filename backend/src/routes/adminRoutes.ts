@@ -3,7 +3,8 @@ import { authenticate, authorize } from '../middleware/authMiddleware';
 import { 
   getSystemStats, 
   getLockedAccounts, 
-  getActivityLogs 
+  getActivityLogs,
+  getTokenSecurityEvents
 } from '../controllers/adminController';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -69,7 +70,7 @@ router.get('/locked-accounts', asyncHandler(getLockedAccounts));
  *         schema:
  *           type: integer
  *           default: 20
- *         description: Number of items per page
+ *         description: Items per page
  *     responses:
  *       200:
  *         description: Activity logs retrieved successfully
@@ -79,5 +80,36 @@ router.get('/locked-accounts', asyncHandler(getLockedAccounts));
  *         description: Forbidden - Admin access required
  */
 router.get('/activity-logs', asyncHandler(getActivityLogs));
+
+/**
+ * @swagger
+ * /api/admin/token-security-events:
+ *   get:
+ *     summary: Get token security events
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Items per page
+ *     responses:
+ *       200:
+ *         description: Token security events retrieved successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin access required
+ */
+router.get('/token-security-events', asyncHandler(getTokenSecurityEvents));
 
 export default router; 

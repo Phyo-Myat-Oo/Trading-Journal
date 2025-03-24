@@ -1,9 +1,11 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { config } from '../config';
+import crypto from 'crypto';
 
 export interface IUser extends Document {
+  _id: Types.ObjectId;
   email: string;
   password: string;
   firstName: string;
@@ -16,36 +18,27 @@ export interface IUser extends Document {
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
   passwordChangedAt?: Date;
+  passwordHistory: string[];
   failedLoginAttempts: number;
   accountLocked: boolean;
   accountLockedUntil?: Date;
   previousLockouts: number;
+  twoFactorEnabled: boolean;
+  twoFactorSecret?: string;
+  twoFactorBackupCodes?: string[];
+  twoFactorTempSecret?: string;
+  name?: string;
+  phone?: string;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
   generateAuthToken(): string;
+  generateTokens(): { accessToken: string; refreshToken: string };
+  generatePasswordResetToken(): string;
   fullName: string;
+  isPasswordInHistory(candidatePassword: string): Promise<boolean>;
 }
 
-/**
- * User Schema
- * @description Mongoose schema for User model with authentication and profile information
- * 
- * @property {string} email - User's email address (unique)
- * @property {string} password - Hashed password
- * @property {string} firstName - User's first name
- * @property {string} lastName - User's last name
- * @property {string} role - User's role (user or admin)
- * @property {boolean} isActive - Whether the user account is active
- * @property {Date} lastLogin - Timestamp of last successful login
- * @property {Date} createdAt - Timestamp of user creation
- * @property {Date} updatedAt - Timestamp of last update
- * @property {Date} passwordChangedAt - Timestamp when password was last changed
- * @property {number} failedLoginAttempts - Count of consecutive failed login attempts
- * @property {boolean} accountLocked - Whether the account is currently locked
- * @property {Date} accountLockedUntil - Timestamp when account lock expires
- * @property {number} previousLockouts - Count of how many times the account has been locked previously
- */
 const userSchema = new Schema<IUser>(
   {
     email: {
@@ -92,6 +85,11 @@ const userSchema = new Schema<IUser>(
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     passwordChangedAt: Date,
+    passwordHistory: {
+      type: [String],
+      default: [],
+      description: 'History of previous password hashes'
+    },
     failedLoginAttempts: {
       type: Number,
       default: 0
@@ -104,7 +102,25 @@ const userSchema = new Schema<IUser>(
     previousLockouts: {
       type: Number,
       default: 0
-    }
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false
+    },
+    twoFactorSecret: {
+      type: String,
+      default: null
+    },
+    twoFactorBackupCodes: {
+      type: [String],
+      default: []
+    },
+    twoFactorTempSecret: {
+      type: String,
+      default: null
+    },
+    name: String,
+    phone: String
   },
   {
     timestamps: true,
@@ -119,6 +135,27 @@ userSchema.pre('save', async function(this: IUser & { password: string }, next) 
     // Set passwordChangedAt when the password changes
     if (!this.isNew) {
       this.passwordChangedAt = new Date();
+      
+      // Add current (old) hashed password to history before changing it
+      // First, retrieve the current document from the database to get the current password
+      const currentUser = await mongoose.model('User').findById(this._id);
+      if (currentUser) {
+        const currentPassword = currentUser.get('password');
+        
+        // Initialize password history array if it doesn't exist
+        if (!this.passwordHistory) {
+          this.passwordHistory = [];
+        }
+        
+        // Keep only the most recent passwords (limit to 5)
+        const MAX_PASSWORD_HISTORY = 5;
+        if (currentPassword) {
+          this.passwordHistory.push(currentPassword);
+          if (this.passwordHistory.length > MAX_PASSWORD_HISTORY) {
+            this.passwordHistory = this.passwordHistory.slice(-MAX_PASSWORD_HISTORY);
+          }
+        }
+      }
     }
     
     const salt = await bcrypt.genSalt(10);
@@ -134,48 +171,78 @@ userSchema.methods.comparePassword = async function(this: IUser, candidatePasswo
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Create indexes - don't duplicate the email index which is already set in the schema
-userSchema.index({ role: 1 });
+// Check if a password is in the user's password history
+userSchema.methods.isPasswordInHistory = async function(this: IUser, candidatePassword: string): Promise<boolean> {
+  // If password history is empty, return false
+  if (!this.passwordHistory || this.passwordHistory.length === 0) {
+    return false;
+  }
 
-/**
- * Generate JWT token method
- * @returns {string} JWT token containing user ID
- */
-userSchema.methods.generateAuthToken = function(this: IUser): string {
-  return jwt.sign(
+  // Check each password in history
+  for (const hashedPassword of this.passwordHistory) {
+    const isMatch = await bcrypt.compare(candidatePassword, hashedPassword);
+    if (isMatch) {
+      return true; // Password found in history
+    }
+  }
+
+  return false; // Password not found in history
+};
+
+// Generate tokens method
+userSchema.methods.generateTokens = function(this: IUser): { accessToken: string; refreshToken: string } {
+  const accessToken = jwt.sign(
     { 
       id: this._id,
       email: this.email,
       role: this.role,
-      iat: Math.floor(Date.now() / 1000), // Issued at timestamp
-      iss: 'trading-journal-api' // Issuer
+      iat: Math.floor(Date.now() / 1000),
+      iss: 'trading-journal-api'
     },
     config.jwt.secret as jwt.Secret,
     { expiresIn: config.jwt.accessExpiresIn } as SignOptions
   );
+
+  const refreshToken = jwt.sign(
+    { 
+      id: this._id,
+      email: this.email,
+      role: this.role,
+      iat: Math.floor(Date.now() / 1000),
+      iss: 'trading-journal-api'
+    },
+    config.jwt.refreshSecret as jwt.Secret,
+    { expiresIn: config.jwt.refreshExpiresIn } as SignOptions
+  );
+
+  return { accessToken, refreshToken };
 };
 
-/**
- * Get full name virtual property
- * @returns {string} User's full name
- */
+// Generate password reset token method
+userSchema.methods.generatePasswordResetToken = function(this: IUser): string {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  this.resetPasswordToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  this.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  return resetToken;
+};
+
+// Get full name virtual property
 userSchema.virtual('fullName').get(function(this: IUser): string {
   return `${this.firstName} ${this.lastName}`;
 });
 
-/**
- * Find user by email static method
- * @param {string} email - Email address to search for
- * @returns {Promise<IUser | null>} User document if found, null otherwise
- */
+// Create indexes
+userSchema.index({ role: 1 });
+
+// Find user by email static method
 userSchema.statics.findByEmail = async function(email: string): Promise<IUser | null> {
   return this.findOne({ email: email.toLowerCase() });
 };
 
-/**
- * Find active users static method
- * @returns {Promise<IUser[]>} Array of active user documents
- */
+// Find active users static method
 userSchema.statics.findActive = async function(): Promise<IUser[]> {
   return this.find({ isActive: true });
 };

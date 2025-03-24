@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { AxiosError } from 'axios';
-import authService, { LoginData, RegisterData } from '../services/authService';
+import authService, { LoginData, RegisterData, AuthResponse } from '../services/authService';
+import { checkOnlineStatus, subscribeToNetworkStatus } from '../utils/auth';
+import { TokenManager } from '../services/TokenManager';
+import { TokenEventType } from '../types/token';
+import { jwtDecode } from 'jwt-decode';
+import type { JwtPayload } from 'jwt-decode';
+import SessionExpirationDialog from '../components/auth/SessionExpirationDialog';
 
 // Add a simple debug logging function to control verbosity
 const debugLog = (message: string, data?: unknown) => {
@@ -9,31 +15,55 @@ const debugLog = (message: string, data?: unknown) => {
   }
 };
 
-interface User {
+// Define AuthContext types
+export type AuthStateType = 'initializing' | 'authenticated' | 'unauthenticated' | 'refreshing';
+
+export interface User {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
   role: 'user' | 'admin';
+  isVerified?: boolean;
 }
 
+// Define Auth Context value interface
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (data: LoginData) => Promise<boolean>;
+  authState: AuthStateType;
+  twoFactorRequired: boolean;
+  twoFactorPendingUserId: string | null;
+  login: (data: LoginData) => Promise<AuthResponse>;
   register: (data: RegisterData) => Promise<void>;
   logout: (silent?: boolean) => Promise<void>;
   refreshToken: () => Promise<boolean>;
   error: string | null;
   clearError: () => void;
+  verifyTwoFactor: (userId: string, code: string) => Promise<AuthResponse>;
+  verifyWithBackupCode: (userId: string, backupCode: string) => Promise<AuthResponse>;
+  cancelTwoFactor: () => void;
 }
 
-type AuthProviderProps = {
+// Create the context with a default value
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+interface AuthProviderProps {
   children: React.ReactNode;
+}
+
+// Use the Auth Context hook
+export const useAuthContext = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuthContext must be used within an AuthProvider');
+  }
+  return context;
 };
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+// Export the hook with a shorter name for convenience
+export const useAuth = useAuthContext;
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
@@ -41,10 +71,198 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [error, setError] = useState<string | null>(null);
   const [tokenCheckInterval, setTokenCheckInterval] = useState<number | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [tokenRefreshAttempts, setTokenRefreshAttempts] = useState(0);
+  const [authState, setAuthState] = useState<AuthStateType>('initializing');
+  
+  // 2FA state variables
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [twoFactorPendingUserId, setTwoFactorPendingUserId] = useState<string | null>(null);
   
   // Add a ref to track initialization state
   const isInitializing = useRef(false);
   const isInitialized = useRef(false);
+
+  // New state for session expiration dialog
+  const [showExpirationDialog, setShowExpirationDialog] = useState(false);
+  const [timeToExpiration, setTimeToExpiration] = useState(0);
+  
+  // Track online/offline status with improved debouncing
+  const [isOnline, setIsOnline] = useState(checkOnlineStatus());
+  const lastRefreshAttempt = useRef<number>(0);
+  const lastNetworkChange = useRef<number>(0);
+  const MIN_REFRESH_INTERVAL = 30000; // 30 seconds minimum between network-triggered refreshes
+  const NETWORK_CHANGE_COOLDOWN = 5000; // 5 seconds cooldown between network status changes
+  
+  // Initialize TokenManager
+  const tokenManagerRef = useRef<TokenManager>(TokenManager.getInstance());
+
+  // Setup network status listener
+  useEffect(() => {
+    debugLog('Setting up network status listener');
+    
+    const handleNetworkChange = (online: boolean) => {
+      const now = Date.now();
+      // Prevent rapid toggling by adding a cooldown
+      if (now - lastNetworkChange.current < NETWORK_CHANGE_COOLDOWN) {
+        debugLog(`Ignoring network change, still in cooldown (${(now - lastNetworkChange.current) / 1000}s)`);
+        return;
+      }
+      
+      lastNetworkChange.current = now;
+      debugLog(`Network status changed to ${online ? 'online' : 'offline'}`);
+      
+      setIsOnline(online);
+      
+      // If we're coming back online after being offline, try to refresh the token
+      if (online && authState === 'authenticated') {
+        // Only refresh if it's been a while since last attempt
+        const timeSinceLastRefresh = now - lastRefreshAttempt.current;
+        if (timeSinceLastRefresh > MIN_REFRESH_INTERVAL) {
+          debugLog(`Refreshing token after reconnection (${timeSinceLastRefresh / 1000}s since last attempt)`);
+          lastRefreshAttempt.current = now;
+          refreshToken().catch(err => {
+            console.error('Failed to refresh token after reconnection:', err);
+          });
+        } else {
+          debugLog(`Skipping refresh, too soon since last attempt (${timeSinceLastRefresh / 1000}s)`);
+        }
+      }
+    };
+    
+    const unsubscribe = subscribeToNetworkStatus(handleNetworkChange);
+    return unsubscribe;
+  }, [authState]);
+  
+  // Save 2FA state to localStorage when it changes
+  useEffect(() => {
+    if (twoFactorRequired && twoFactorPendingUserId) {
+      localStorage.setItem('twoFactorState', JSON.stringify({
+        required: twoFactorRequired,
+        userId: twoFactorPendingUserId
+      }));
+    } else {
+      localStorage.removeItem('twoFactorState');
+    }
+  }, [twoFactorRequired, twoFactorPendingUserId]);
+
+  // Handle session extension
+  const handleExtendSession = async (): Promise<void> => {
+    await refreshToken();
+  };
+
+  // Handle session expiration dialog close
+  const handleExpirationDialogClose = () => {
+    setShowExpirationDialog(false);
+  };
+
+  // Listen to TokenManager events
+  useEffect(() => {
+    const tokenManager = tokenManagerRef.current;
+    
+    // Handle token refreshed event
+    const handleTokenRefresh = (token: unknown) => {
+      debugLog('TokenManager refreshed token');
+      setAuthState('authenticated');
+      setTokenRefreshAttempts(0);
+      
+      // Close expiration dialog if open
+      if (showExpirationDialog) {
+        setShowExpirationDialog(false);
+      }
+      
+      // Make sure we have user data
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        try {
+          // Try to extract user info from token
+          const stringToken = token as string;
+          const decoded = jwtDecode<JwtPayload & {id: string; email?: string; firstName?: string; lastName?: string; role?: string}>(stringToken);
+          if (decoded && decoded.id) {
+            // Create minimal user object
+            const minimalUser = {
+              id: decoded.id,
+              email: decoded.email || 'unknown@example.com',
+              firstName: decoded.firstName || 'Unknown',
+              lastName: decoded.lastName || 'User',
+              role: (decoded.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin'
+            };
+            setUser(minimalUser);
+          }
+        } catch (error) {
+          console.error('Failed to extract user data from token:', error);
+        }
+      }
+    };
+    
+    // Handle token expired event
+    const handleTokenExpired = () => {
+      debugLog('TokenManager reported token expired');
+      
+      // Close expiration dialog if it was showing
+      if (showExpirationDialog) {
+        setShowExpirationDialog(false);
+      }
+      
+      if (isOnline) {
+        refreshToken().catch(err => {
+          console.error('Failed to refresh expired token:', err);
+          setAuthState('unauthenticated');
+        });
+      } else {
+        // If offline, keep authenticated state but mark for refresh when online
+        debugLog('Token expired while offline, will refresh when online');
+      }
+    };
+    
+    // Handle token expiring soon event
+    const handleTokenExpiring = (timeToExpiration: unknown) => {
+      const secondsToExpiry = Math.round(timeToExpiration as number);
+      debugLog(`TokenManager reported token expiring soon (${secondsToExpiry}s remaining)`);
+      
+      // If there's less than 2 minutes remaining, show the expiration dialog
+      if (secondsToExpiry <= 120 && secondsToExpiry > 10) {
+        setTimeToExpiration(secondsToExpiry);
+        setShowExpirationDialog(true);
+      }
+      
+      // Proactively refresh token if we're online and the dialog is not showing
+      // or there's very little time left (for background tabs)
+      if (isOnline && (!showExpirationDialog || secondsToExpiry <= 10)) {
+        refreshToken().catch(err => {
+          console.error('Failed to proactively refresh token:', err);
+        });
+      }
+    };
+    
+    // Handle token error event
+    const handleTokenError = (error: unknown) => {
+      console.error('TokenManager reported error:', error);
+      // Increment refresh attempts on error
+      setTokenRefreshAttempts(prev => prev + 1);
+      
+      // If we've had too many errors, log out
+      if (tokenRefreshAttempts >= 3 && isOnline) {
+        debugLog('Too many token errors, logging out');
+        logout(true).catch(err => {
+          console.error('Error during forced logout:', err);
+        });
+      }
+    };
+    
+    // Register event listeners
+    tokenManager.on(TokenEventType.TOKEN_REFRESH, handleTokenRefresh);
+    tokenManager.on(TokenEventType.TOKEN_EXPIRED, handleTokenExpired);
+    tokenManager.on(TokenEventType.TOKEN_EXPIRING, handleTokenExpiring);
+    tokenManager.on(TokenEventType.TOKEN_ERROR, handleTokenError);
+    
+    // Clean up on unmount
+    return () => {
+      tokenManager.off(TokenEventType.TOKEN_REFRESH, handleTokenRefresh);
+      tokenManager.off(TokenEventType.TOKEN_EXPIRED, handleTokenExpired);
+      tokenManager.off(TokenEventType.TOKEN_EXPIRING, handleTokenExpiring);
+      tokenManager.off(TokenEventType.TOKEN_ERROR, handleTokenError);
+    };
+  }, [isOnline, tokenRefreshAttempts, showExpirationDialog]);
 
   // Set up token refresh mechanism
   useEffect(() => {
@@ -64,34 +282,44 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const initAuth = async () => {
       // Set initializing flag
       isInitializing.current = true;
+      setAuthState('initializing');
       
       debugLog('Starting auth initialization');
       try {
-        // Get user from localStorage (might be null)
-        const currentUser = authService.getCurrentUser();
+        // Check for 2FA pending state first
+        if (twoFactorRequired && twoFactorPendingUserId) {
+          debugLog('Found pending 2FA verification during initialization');
+          setAuthState('unauthenticated');
+          setLoading(false);
+          isInitializing.current = false;
+          isInitialized.current = true;
+          return;
+        }
         
-        // Simple initialization path: if we have a user, try to refresh the token
-        if (currentUser) {
-          debugLog('User found in localStorage, attempting token refresh');
-          const refreshSuccessful = await authService.refreshToken();
-          
-          if (refreshSuccessful) {
-            debugLog('Token refresh successful, restoring user session');
+        // Use the new initialize auth method from auth service
+        const isAuthenticated = await authService.initializeAuth();
+        
+        if (isAuthenticated) {
+          debugLog('User is authenticated, restoring session');
+          const currentUser = authService.getCurrentUser();
+          if (currentUser) {
             setUser(currentUser);
+            setAuthState('authenticated');
             startTokenRefreshTimer();
           } else {
-            // Clear stale user data if refresh fails
-            debugLog('Token refresh failed, clearing user data');
-            localStorage.removeItem('user');
+            // This shouldn't happen, but handle just in case
+            setAuthState('unauthenticated');
           }
         } else {
-          debugLog('No user found in localStorage, proceeding as unauthenticated');
+          debugLog('User is not authenticated');
+          setAuthState('unauthenticated');
         }
         
         // Mark as initialized at the end of successful initialization
         isInitialized.current = true;
       } catch (error) {
         console.error('Error during auth initialization:', error);
+        setAuthState('unauthenticated');
       } finally {
         // Clear initializing flag
         isInitializing.current = false;
@@ -108,47 +336,26 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         window.clearInterval(tokenCheckInterval);
       }
     };
-  }, []);
+  }, [tokenRefreshAttempts, twoFactorRequired, twoFactorPendingUserId, isOnline]);
 
-  // Setup periodic token refresh using the standardized strategy
+  // Setup periodic token refresh using the TokenManager's events instead of interval
   const startTokenRefreshTimer = () => {
     // Clear any existing interval
     if (tokenCheckInterval) {
       debugLog('Clearing existing token check interval');
       window.clearInterval(tokenCheckInterval);
+      setTokenCheckInterval(null);
     }
-
-    debugLog('Starting new token refresh timer');
     
-    // Check token every 5 minutes (better balance to prevent expiration edge cases)
-    const intervalId = window.setInterval(async () => {
-      try {
-        // Check if token exists
-        const token = authService.getToken();
-        if (!token) {
-          debugLog('No token found, cannot check expiration');
-          return;
-        }
-        
-        // Use the standard expiration check
-        if (authService.isTokenExpired()) {
-          debugLog('Token needs refresh');
-          const success = await authService.refreshToken();
-          if (!success) {
-            debugLog('Scheduled token refresh failed, logging out user');
-            await logout();
-          } else {
-            debugLog('Scheduled token refresh succeeded');
-          }
-        } else {
-          debugLog('Token still valid, no refresh needed');
-        }
-      } catch (error) {
-        console.error('Error during token refresh check:', error);
-      }
-    }, 300000); // Check every 5 minutes
-
-    setTokenCheckInterval(intervalId);
+    // TokenManager will automatically handle token refresh via events
+    // So we don't need a timer-based refresh anymore
+    debugLog('Using TokenManager events for automatic refresh');
+    
+    // Make sure TokenManager is initialized with the current token
+    const token = authService.getToken();
+    if (token) {
+      tokenManagerRef.current.initializeToken(token);
+    }
   };
 
   const login = async (data: LoginData) => {
@@ -156,20 +363,43 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       // Only clear errors when starting a new login attempt
       setError(null);
       setLoading(true);
+      
+      // Clear any pending 2FA state
+      setTwoFactorRequired(false);
+      setTwoFactorPendingUserId(null);
+      
       console.log('AuthContext: Calling login service');
       const response = await authService.login(data);
       console.log('AuthContext: Login response received', response);
       
+      // Check if 2FA is required
+      if (response.requireTwoFactor && response.userId) {
+        console.log('AuthContext: 2FA required, setting 2FA state');
+        setTwoFactorRequired(true);
+        setTwoFactorPendingUserId(response.userId);
+        setAuthState('unauthenticated'); // Not authenticated until 2FA is complete
+        return response;
+      }
+      
       if (response.user) {
         console.log('AuthContext: Setting user in state', response.user);
-      setUser(response.user);
+        setUser(response.user);
+        setAuthState('authenticated');
       
-      // Start token refresh timer
-      startTokenRefreshTimer();
-        return true; // Success flag
+        // Start token refresh timer, but now using TokenManager
+        startTokenRefreshTimer();
+        
+        // Initialize TokenManager with the new token
+        const token = authService.getToken();
+        if (token) {
+          tokenManagerRef.current.initializeToken(token);
+        }
+        
+        return response;
       } else {
         console.error('AuthContext: User data missing from login response');
         setError('Invalid login response: missing user data');
+        setAuthState('unauthenticated');
         throw new Error('Invalid login response: missing user data');
       }
     } catch (err: unknown) {
@@ -193,10 +423,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       
       console.log('AuthContext: Setting error message:', errorMessage);
       setError(errorMessage);
-      return false; // Failure flag
+      setAuthState('unauthenticated');
+      return { success: false, message: errorMessage };
     } finally {
       setLoading(false);
     }
+  };
+
+  // Allow canceling 2FA verification
+  const cancelTwoFactor = () => {
+    setTwoFactorRequired(false);
+    setTwoFactorPendingUserId(null);
+    localStorage.removeItem('twoFactorState');
   };
 
   const register = async (data: RegisterData) => {
@@ -204,7 +442,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setError(null);
       setLoading(true);
       const response = await authService.register(data);
-      setUser(response.user);
+      if (response.user) {
+        setUser(response.user);
+      }
       
       // Start token refresh timer
       startTokenRefreshTimer();
@@ -220,61 +460,80 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = async (silent: boolean = false) => {
-    // Prevent multiple logout calls
-    if (isLoggingOut) {
-      console.log('AuthContext: Logout already in progress, ignoring duplicate call');
-      return;
-    }
-    
-    console.log('AuthContext: Logout called, silent mode:', silent);
-    setIsLoggingOut(true);
-    
-    // Clear the token refresh interval immediately
-    if (tokenCheckInterval) {
-      console.log('Clearing token check interval during logout');
-      window.clearInterval(tokenCheckInterval);
-      setTokenCheckInterval(null);
-    }
-    
-    // Clear user data immediately to prevent further API calls
-    console.log('Resetting user state before API call');
-    setUser(null);
-    setError(null);
-    
-    // Call the API only after clearing local state
-    if (!silent) {
-      try {
-        console.log('Calling logout endpoint');
-        // Wait at most 3 seconds for the logout call
-        const logoutPromise = authService.logout();
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Logout timeout')), 3000);
-        });
-        
-        try {
-          await Promise.race([logoutPromise, timeoutPromise]);
-          console.log('Logout API call completed successfully');
-        } catch {
-          console.warn('Logout API call timed out, but local logout completed');
-        }
-      } catch (err) {
-        console.error('Error during logout API call:', err);
-        // Continue with local logout even if API call fails
+    try {
+      // Prevent multiple logout calls
+      if (isLoggingOut) {
+        console.log('Already logging out, ignoring duplicate request');
+        return;
       }
+      
+      setIsLoggingOut(true);
+      console.log(`AuthContext: Logging out (silent: ${silent})`);
+      
+      // Clear user state
+      setUser(null);
+      setAuthState('unauthenticated');
+      
+      // Clear token refresh timer
+      if (tokenCheckInterval) {
+        window.clearInterval(tokenCheckInterval);
+        setTokenCheckInterval(null);
+      }
+      
+      // Revoke token in TokenManager
+      tokenManagerRef.current.revokeToken();
+      
+      // Call logout API
+      if (!silent) {
+        await authService.logout();
+      }
+    } catch (err) {
+      // Even if the API call fails, we still want to clear local state
+      console.error('Error during logout API call:', err);
+    } finally {
+      // Reset logging out state after a small delay
+      setTimeout(() => {
+        setIsLoggingOut(false);
+      }, 1000);
     }
-    
-    // Reset logout state after a delay
-    setTimeout(() => {
-      setIsLoggingOut(false);
-    }, 2000);
   };
 
   const refreshToken = async (): Promise<boolean> => {
     try {
+      setAuthState('refreshing');
+      // Use authService.refreshToken which now delegates to TokenManager
       const success = await authService.refreshToken();
+      if (success) {
+        // Update auth state on success
+        setAuthState('authenticated');
+        // Reset refresh attempts on success
+        setTokenRefreshAttempts(0);
+      } else {
+        // Increment refresh attempts on failure
+        setTokenRefreshAttempts(prev => prev + 1);
+        
+        // Update state based on network status
+        if (!isOnline && tokenRefreshAttempts < 3) {
+          // Keep authenticated when offline for a grace period
+          setAuthState('authenticated');
+        } else {
+          setAuthState('unauthenticated');
+        }
+      }
       return success;
-    } catch (err) {
-      console.error('Error refreshing token:', err);
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      // Increment refresh attempts on error
+      setTokenRefreshAttempts(prev => prev + 1);
+      
+      // Update auth state based on network status and retry count
+      if (!isOnline && tokenRefreshAttempts < 3) {
+        // Keep authenticated when offline for a grace period
+        setAuthState('authenticated');
+      } else {
+        setAuthState('unauthenticated');
+      }
+      
       return false;
     }
   };
@@ -283,27 +542,161 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setError(null);
   };
 
+  /**
+   * Verify a TOTP code during 2FA login
+   */
+  const verifyTwoFactor = async (userId: string, code: string): Promise<AuthResponse> => {
+    // Input validation
+    if (!userId || !code) {
+      const errorMessage = 'User ID and verification code are required';
+      console.error('AuthContext: 2FA verification error -', errorMessage);
+      setError(errorMessage);
+      return { success: false, message: errorMessage };
+    }
+    
+    try {
+      setError(null);
+      setLoading(true);
+      console.log('AuthContext: Verifying 2FA code');
+      
+      const response = await authService.verifyTwoFactorLogin(userId, code);
+      console.log('AuthContext: 2FA verification response', response);
+      
+      if (response.user) {
+        console.log('AuthContext: Setting user in state after 2FA', response.user);
+        setUser(response.user);
+        
+        // Clear 2FA state since verification was successful
+        setTwoFactorRequired(false);
+        setTwoFactorPendingUserId(null);
+        
+        // Set auth state to authenticated
+        setAuthState('authenticated');
+        
+        // Start token refresh timer
+        startTokenRefreshTimer();
+        return response;
+      } else {
+        console.error('AuthContext: User data missing from 2FA response');
+        setError('Invalid 2FA verification response: missing user data');
+        throw new Error('Invalid 2FA verification response: missing user data');
+      }
+    } catch (err: unknown) {
+      console.error('AuthContext: 2FA verification error', err);
+      let errorMessage = 'Failed to verify code';
+      
+      if (err instanceof AxiosError) {
+        if (err.response?.data?.message) {
+          errorMessage = err.response.data.message;
+        } else if (err.response?.status === 400) {
+          errorMessage = 'Invalid verification code or session expired';
+        } else if (err.response?.status === 404) {
+          errorMessage = 'User not found or session expired';
+        } else if (!err.response && err.message.includes('Network Error')) {
+          errorMessage = 'Network error - please check your connection';
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+      return { success: false, message: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  /**
+   * Verify a backup code during 2FA login
+   */
+  const verifyWithBackupCode = async (userId: string, backupCode: string): Promise<AuthResponse> => {
+    // Input validation
+    if (!userId || !backupCode) {
+      const errorMessage = 'User ID and backup code are required';
+      console.error('AuthContext: Backup code verification error -', errorMessage);
+      setError(errorMessage);
+      return { success: false, message: errorMessage };
+    }
+    
+    try {
+      setError(null);
+      setLoading(true);
+      console.log('AuthContext: Verifying backup code');
+      
+      const response = await authService.verifyBackupCode(userId, backupCode);
+      console.log('AuthContext: Backup code verification response', response);
+      
+      if (response.user) {
+        console.log('AuthContext: Setting user in state after backup code', response.user);
+        setUser(response.user);
+        
+        // Clear 2FA state since verification was successful
+        setTwoFactorRequired(false);
+        setTwoFactorPendingUserId(null);
+        
+        // Set auth state to authenticated
+        setAuthState('authenticated');
+        
+        // Start token refresh timer
+        startTokenRefreshTimer();
+        return response;
+      } else {
+        console.error('AuthContext: User data missing from backup code response');
+        setError('Invalid backup code verification response: missing user data');
+        throw new Error('Invalid backup code verification response: missing user data');
+      }
+    } catch (err: unknown) {
+      console.error('AuthContext: Backup code verification error', err);
+      let errorMessage = 'Failed to verify backup code';
+      
+      if (err instanceof AxiosError) {
+        if (err.response?.data?.message) {
+          errorMessage = err.response.data.message;
+        } else if (err.response?.status === 400) {
+          errorMessage = 'Invalid backup code or session expired';
+        } else if (err.response?.status === 404) {
+          errorMessage = 'User not found or session expired';
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+      return { success: false, message: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const value = {
     user,
-    isAuthenticated: !!user && !!authService.getToken(),
+    isAuthenticated: Boolean(user && authState === 'authenticated' && !twoFactorRequired),
     loading,
+    authState,
+    twoFactorRequired,
+    twoFactorPendingUserId,
     login,
     register,
     logout,
     refreshToken,
     error,
-    clearError
+    clearError,
+    verifyTwoFactor,
+    verifyWithBackupCode,
+    cancelTwoFactor
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
-
-export default AuthContext; 
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      
+      {/* Session Expiration Dialog */}
+      <SessionExpirationDialog
+        isOpen={showExpirationDialog}
+        timeToExpiration={timeToExpiration}
+        onExtend={handleExtendSession}
+        onClose={handleExpirationDialogClose}
+      />
+    </AuthContext.Provider>
+  );
+}; 

@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
 import { createError, HttpStatus } from '../utils/errorResponse';
 import { config } from '../config';
+import * as tokenService from '../services/tokenService';
 
 /**
  * Authenticate middleware - verifies JWT token and attaches user to request
@@ -28,19 +29,35 @@ export const authenticate = async (
     try {
       const decoded = jwt.verify(
         token,
-        config.jwt.secret as jwt.Secret
+        config.jwt.secret as jwt.Secret,
+        { audience: 'trading-journal-app' }
       ) as { 
         id: string; 
         email?: string;
         role?: string;
         type?: string;
+        aud?: string;
         iat?: number;
         exp?: number;
+        jti?: string;
       };
       
       // Additional validation
       if (decoded.type !== 'access') {
         return next(createError('Invalid token type', HttpStatus.UNAUTHORIZED));
+      }
+
+      // Verify audience claim
+      if (decoded.aud !== 'trading-journal-app') {
+        return next(createError('Invalid token audience', HttpStatus.UNAUTHORIZED));
+      }
+      
+      // Check if token is blacklisted (for tokens with JTI)
+      if (decoded.jti) {
+        const isBlacklisted = await tokenService.isTokenBlacklisted(decoded.jti);
+        if (isBlacklisted) {
+          return next(createError('Token has been revoked', HttpStatus.UNAUTHORIZED));
+        }
       }
       
       // Find user by id from token

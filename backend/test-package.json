@@ -1,0 +1,13 @@
+{
+  "name": "auth-tests",
+  "version": "1.0.0",
+  "description": "Tests for authentication middleware",
+  "type": "module",
+  "scripts": {
+    "test-auth": "node test-auth.js",
+    "test-user": "node test-user-route.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2"
+  }
+} 

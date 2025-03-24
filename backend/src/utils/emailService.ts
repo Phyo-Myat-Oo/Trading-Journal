@@ -283,6 +283,48 @@ class EmailService {
       throw new Error('Failed to send account unlock email');
     }
   }
+
+  /**
+   * Send password reset confirmation email
+   */
+  async sendPasswordResetConfirmationEmail({
+    email,
+    firstName
+  }: {
+    email: string;
+    firstName: string;
+  }): Promise<void> {
+    const subject = 'Password Reset Confirmation';
+    
+    // In test mode, don't actually send emails
+    if (process.env.NODE_ENV === 'test') {
+      console.log('Test mode: Password reset confirmation email would be sent to', email);
+      return;
+    }
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Password Reset Successful</h2>
+        <p>Hello ${firstName},</p>
+        <p>Your password has been successfully reset. If you did not initiate this change, please contact our support team immediately.</p>
+        <p>For security reasons, we recommend that you:</p>
+        <ul>
+          <li>Log out of all active sessions</li>
+          <li>Review your recent account activity</li>
+          <li>Update any other accounts where you use the same password</li>
+        </ul>
+        <p>Thank you for using our service!</p>
+        <p>Best regards,<br>The Trading Journal Team</p>
+      </div>
+    `;
+
+    await this.transporter.sendMail({
+      from: process.env.SMTP_FROM || 'noreply@tradingjournal.com',
+      to: email,
+      subject,
+      html
+    });
+  }
 }
 
 export const emailService = new EmailService(); 
