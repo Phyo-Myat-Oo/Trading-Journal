@@ -160,13 +160,26 @@ API documentation is available at `http://localhost:3000/api-docs` when running 
 
 - JWT-based authentication
 - Password hashing with bcrypt
-- Rate limiting
-- CORS protection
-- XSS prevention
-- HTTP security headers
-- Request validation
-- Input sanitization
+- Multi-layered rate limiting:
+  - Global IP-based rate limiting
+  - Endpoint-specific rate limiting
+  - Authentication-focused rate limiting
+- CORS protection with strict rules
+- XSS prevention mechanisms
+- Comprehensive HTTP security headers:
+  - Content Security Policy (CSP)
+  - Strict Transport Security (HSTS)
+  - Cross-Origin Resource Policy (CORP)
+  - Cross-Origin Opener Policy (COOP)
+  - Cross-Origin Embedder Policy (COEP)
+  - Permissions-Policy
+  - X-Content-Type-Options
+  - Referrer-Policy
+- Request validation with Zod schemas
+- Input sanitization against injection attacks
 - Error handling middleware
+- CSP violation reporting
+- Progressive account lockout system
 
 ## Testing
 

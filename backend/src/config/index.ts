@@ -30,6 +30,12 @@ const envSchema = z.object({
   // Rate Limiting
   RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('900000'), // 15 minutes
   RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('100'),
+  // IP-based rate limiting
+  IP_RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('900000'), // 15 minutes
+  IP_RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('500'), // Higher limit for IP-only
+  
+  // Security Headers
+  CSP_REPORT_URI: z.string().optional(), // URI for CSP violation reports
   
   // Account Lockout
   MAX_LOGIN_ATTEMPTS: z.string().transform(Number).default('5'),
@@ -88,6 +94,15 @@ export const config = {
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     maxRequests: envVars.RATE_LIMIT_MAX_REQUESTS,
+    // IP-based rate limiting settings
+    ip: {
+      windowMs: envVars.IP_RATE_LIMIT_WINDOW_MS,
+      maxRequests: envVars.IP_RATE_LIMIT_MAX_REQUESTS,
+    }
+  },
+  
+  security: {
+    cspReportUri: envVars.CSP_REPORT_URI,
   },
   
   accountLockout: {

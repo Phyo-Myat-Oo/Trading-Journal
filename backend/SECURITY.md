@@ -22,9 +22,26 @@ This document outlines the security measures implemented in the Trading Journal 
 
 ## HTTP Security
 - Helmet for secure HTTP headers
-- Content Security Policy (CSP)
-- CORS configuration
+- Comprehensive Content Security Policy (CSP) with environment-specific rules
+- Strict Transport Security (HSTS) with preload support
+- Cross-Origin Resource Policy (CORP) to prevent resource theft
+- Cross-Origin Opener Policy (COOP) to protect against tab-nabbing attacks
+- Cross-Origin Embedder Policy (COEP) to enhance site isolation
+- Permissions-Policy to restrict browser feature usage
+- CORS configuration with strict rules
 - Request timeout protection
+- X-Content-Type-Options to prevent MIME-type sniffing
+- Referrer-Policy to control information in referrer header
+
+## Rate Limiting
+- Multiple layers of rate limiting protection:
+  - Global IP-based rate limiting regardless of endpoint
+  - Route-based rate limiting with IP + user agent tracking
+  - Stricter rate limiting for authentication endpoints
+  - Rate limiting for API-specific endpoints
+  - Token refresh rate limiting
+- Custom rate limit violation response with Retry-After headers
+- Logging of rate limit violations for security monitoring
 
 ## Error Handling
 - Global error handling middleware

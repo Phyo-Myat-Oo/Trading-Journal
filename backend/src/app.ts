@@ -10,7 +10,7 @@ import { ensureUploadDir } from './utils/ensureUploadDir';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
 import { requestLogger } from './middleware/requestLogger';
-import { sanitizeData, preventXss, preventHpp, requestTimeout, setCSP, configureSecurityMiddleware } from './middleware/security';
+import { sanitizeData, preventXss, preventHpp, requestTimeout, setCSP, configureSecurityMiddleware, setAdvancedSecurityHeaders } from './middleware/security';
 import { config } from './config';
 import authRoutes from './routes/authRoutes';
 import accountRoutes from './routes/accountRoutes';
@@ -29,7 +29,7 @@ import { swaggerSpec } from './config/swagger';
 import routes from './routes';
 import cookieParser from 'cookie-parser';
 import * as tokenService from './services/tokenService';
-import { apiRateLimiter } from './middleware/rateLimitMiddleware';
+import { apiRateLimiter, ipRateLimiter } from './middleware/rateLimitMiddleware';
 import { csrfProtection, handleCsrfError } from './middleware/csrfMiddleware';
 
 // Load environment variables
@@ -85,7 +85,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
  * In production/development, we apply a comprehensive set of security measures:
  * 1. Helmet - Sets various HTTP headers for security
  * 2. CORS - Controls which domains can access the API
- * 3. Custom CSP headers - Content Security Policy
+ * 3. Custom Security Headers - CSP, Permissions-Policy, CORP, COOP, COEP
  * 4. Data sanitization - Prevents injection attacks
  * 5. Parameter pollution prevention
  * 6. Request timeout protection
@@ -95,8 +95,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 if (process.env.NODE_ENV !== 'test') {
   // 1. Set security headers with Helmet
   app.use(helmet({
-    contentSecurityPolicy: config.isProduction, // Enable CSP in production only
-    crossOriginEmbedderPolicy: config.isProduction, // COEP in production only
+    contentSecurityPolicy: false, // We handle CSP with our custom middleware
+    crossOriginEmbedderPolicy: false, // We handle COEP with our custom middleware
     dnsPrefetchControl: { allow: false }, // Disable DNS prefetching
     frameguard: { action: 'deny' }, // Prevent iframe embedding
     hidePoweredBy: true, // Hide X-Powered-By header
@@ -111,7 +111,10 @@ if (process.env.NODE_ENV !== 'test') {
     xssFilter: true // Enable XSS filtering
   }));
 
-  // 3. Custom CSP headers if needed beyond what Helmet provides
+  // 2. Apply advanced security headers
+  app.use(setAdvancedSecurityHeaders);
+
+  // 3. Custom CSP headers beyond what Helmet provides
   app.use(setCSP);
 
   // 4-5. Data sanitization middleware against various attack vectors
@@ -145,15 +148,19 @@ app.use(requestLogger);
 /**
  * Rate Limiting Configuration
  * 
- * Implements three levels of rate limiting:
- * 1. Global rate limiting - Applies to all routes
- * 2. Authentication rate limiting - More strict, applies only to auth endpoints
- * 3. Cookie check endpoint - Higher limit to allow for debugging
+ * Implements multiple levels of rate limiting:
+ * 1. Global IP-based rate limiting - Applies to all routes based solely on IP
+ * 2. Global route-based rate limiting - Applies to all routes
+ * 3. Authentication rate limiting - More strict, applies only to auth endpoints
+ * 4. Cookie check endpoint - Higher limit to allow for debugging
  * 
  * This helps prevent brute force attacks and API abuse
  */
 if (process.env.NODE_ENV !== 'test') {
-  // 1. Global rate limiter for all routes
+  // 1. Apply IP-based rate limiter as first line of defense
+  app.use(ipRateLimiter);
+
+  // 2. Global rate limiter for all routes
   const globalLimiter = rateLimit({
     windowMs: config.rateLimit.windowMs, // Time window in milliseconds
     max: config.rateLimit.maxRequests, // Max requests per window
@@ -170,7 +177,7 @@ if (process.env.NODE_ENV !== 'test') {
   });
   app.use(globalLimiter);
 
-  // 2. Authentication/login rate limiter (more strict for security)
+  // 3. Authentication/login rate limiter (more strict for security)
   const authLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour window
     max: 15, // Increased from 5 to 15 attempts per hour
@@ -185,7 +192,7 @@ if (process.env.NODE_ENV !== 'test') {
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/forgot-password', authLimiter);
   
-  // 3. Cookie check endpoint - higher limit for debugging
+  // 4. Cookie check endpoint - higher limit for debugging
   const cookieCheckLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute window
     max: 30, // Allow 30 requests per minute

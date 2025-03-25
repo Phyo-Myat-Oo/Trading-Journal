@@ -91,12 +91,74 @@ export const requestTimeout = (timeout = 30000) => {
 
 /**
  * Content Security Policy middleware
+ * Provides a comprehensive and configurable CSP
  */
 export const setCSP = (req: Request, res: Response, next: NextFunction) => {
+  // Determine environment
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // Default CSP directives - more restrictive in production
+  const directives = {
+    'default-src': ["'self'"],
+    'img-src': ["'self'", 'data:', 'https:'],
+    'script-src': ["'self'", ...(isProduction ? [] : ["'unsafe-eval'"])], // Allow unsafe-eval in development for tools like React DevTools
+    'style-src': ["'self'", 'https://fonts.googleapis.com', ...(isProduction ? [] : ["'unsafe-inline'"])],
+    'font-src': ["'self'", 'https://fonts.gstatic.com'],
+    'connect-src': ["'self'", ...(isProduction ? [] : ['ws:'])], // Allow WebSockets in development
+    'frame-src': ["'self'"],
+    'object-src': ["'none'"],
+    'base-uri': ["'none'"],
+    'form-action': ["'self'"],
+    'frame-ancestors': ["'none'"],
+    'upgrade-insecure-requests': isProduction ? [] : null, // Force HTTPS in production
+    'block-all-mixed-content': isProduction ? [] : null, // Block mixed content in production
+    'report-uri': [process.env.CSP_REPORT_URI || '/api/csp-report'], // Optional reporting endpoint
+  };
+
+  // Build CSP string from directives
+  const cspString = Object.entries(directives)
+    .filter(([key, value]) => value !== null) // Remove null directives
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        // If value is empty array, it means directive has no value (e.g., 'upgrade-insecure-requests')
+        return value.length ? `${key} ${value.join(' ')}` : key;
+      }
+      return `${key} ${value}`;
+    })
+    .join('; ');
+
+  // Set the CSP header
+  res.setHeader('Content-Security-Policy', cspString);
+  
+  next();
+};
+
+/**
+ * Advanced Security Headers middleware
+ * Sets additional security headers beyond what Helmet provides
+ */
+export const setAdvancedSecurityHeaders = (req: Request, res: Response, next: NextFunction) => {
+  // Permissions Policy (formerly Feature Policy)
+  // Controls which browser features can be used
   res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'"
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), interest-cohort=()'
   );
+
+  // Cross-Origin Resource Policy
+  // Prevents other sites from loading resources from your site
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+
+  // Cross-Origin Opener Policy
+  // Controls how windows/tabs interact with each other
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+
+  // Cross-Origin Embedder Policy
+  // Ensures all resources loaded are either same-origin or have allowed CORS headers
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+  }
+
   next();
 };
 
@@ -154,4 +216,7 @@ export const configureSecurityMiddleware = (app: Express): void => {
     if (req.query) req.query = xssFilter(req.query);
     next();
   });
+  
+  // Apply advanced security headers
+  app.use(setAdvancedSecurityHeaders);
 }; 

@@ -7,6 +7,8 @@ import journalRoutes from './journalRoutes';
 import adminRoutes from './adminRoutes';
 import statisticsRoutes from './statisticsRoutes';
 import scheduledJobsRoutes from './scheduledJobsRoutes';
+import { asyncHandler } from '../middleware/asyncHandler';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -23,5 +25,21 @@ router.use('/api/scheduled-jobs', scheduledJobsRoutes);
 
 // Admin routes - authentication is handled in adminRoutes
 router.use('/api/admin', adminRoutes);
+
+/**
+ * CSP violation reporting endpoint
+ * Used to collect Content Security Policy violation reports
+ */
+router.post('/csp-report', asyncHandler(async (req, res) => {
+  // Log CSP violation for monitoring
+  logger.warn('CSP Violation Report:', {
+    cspReport: req.body['csp-report'] || req.body,
+    userAgent: req.headers['user-agent'],
+    ip: req.ip
+  });
+  
+  // Acknowledge receipt
+  res.status(204).end();
+}));
 
 export default router; 

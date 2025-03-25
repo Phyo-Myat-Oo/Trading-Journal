@@ -1,5 +1,7 @@
 import rateLimit from 'express-rate-limit';
-import { Request } from 'express';
+import { Request, Response } from 'express';
+import { config } from '../config';
+import { logger } from '../utils/logger';
 
 /**
  * Rate limiter for login attempts by IP
@@ -81,6 +83,51 @@ export const tokenRefreshLimiter = rateLimit({
 });
 
 /**
+ * Global rate limiter based solely on IP address
+ * Acts as a first line of defense against distributed attacks
+ * Has higher limits than endpoint-specific rate limiters
+ */
+export const ipRateLimiter = rateLimit({
+  windowMs: config.rateLimit.ip.windowMs,
+  max: config.rateLimit.ip.maxRequests, 
+  message: {
+    status: 'error',
+    message: 'Too many requests from this IP address. Please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request): string => {
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  },
+  handler: (req: Request, res: Response) => {
+    // Log the rate limit violation for monitoring
+    logger.warn(`IP Rate limit exceeded for IP: ${req.ip}`, { 
+      ip: req.ip, 
+      path: req.path,
+      method: req.method,
+      userAgent: req.headers['user-agent']
+    });
+    
+    // Calculate retry-after time
+    const retryAfterSeconds = Math.ceil(config.rateLimit.ip.windowMs / 1000);
+    
+    // Set Retry-After header (in seconds)
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    
+    // Send standardized response
+    res.status(429).json({
+      status: 'error',
+      message: 'Rate limit exceeded. Please try again later.',
+      retryAfter: retryAfterSeconds
+    });
+  },
+  skip: (req: Request) => {
+    // Skip rate limiting for health check endpoint
+    return req.path === '/health';
+  }
+});
+
+/**
  * General API rate limiter
  * Protects all API endpoints from excessive requests
  */
@@ -96,4 +143,18 @@ export const apiRateLimiter = rateLimit({
   keyGenerator: (req: Request): string => {
     return req.ip || 'unknown';
   },
+  handler: (req: Request, res: Response) => {
+    // Calculate retry-after time
+    const retryAfterSeconds = Math.ceil(15 * 60);
+    
+    // Set Retry-After header (in seconds)
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    
+    // Send standardized response
+    res.status(429).json({
+      status: 'error',
+      message: 'Too many requests from this IP, please try again after 15 minutes',
+      retryAfter: retryAfterSeconds
+    });
+  }
 }); 
