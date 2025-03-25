@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { Box, Card, Container, Text, Title, Group, Button, Loader, ThemeIcon, Stack } from '@mantine/core';
 import { RiCheckLine, RiErrorWarningLine, RiMailLine, RiArrowRightLine } from 'react-icons/ri';
+import api from '../utils/api';
+import { AxiosError } from 'axios';
 
 const VerifyEmail = () => {
   const { token = '' } = useParams();
@@ -30,47 +32,38 @@ const VerifyEmail = () => {
       setIsVerifying(true);
       
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/verify-email`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ token }),
+        const { data } = await api.post('/api/auth/verify-email', { token });
+        
+        setVerificationStatus({
+          success: true,
+          message: data.message || 'Your email has been verified successfully!'
         });
         
-        const data = await response.json();
+        // Start countdown for automatic redirect
+        const countdownInterval = setInterval(() => {
+          setCountdown(prev => {
+            if (prev <= 1) {
+              clearInterval(countdownInterval);
+              navigate('/login');
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
         
-        if (response.ok) {
-          setVerificationStatus({
-            success: true,
-            message: data.message || 'Your email has been verified successfully!'
-          });
-          
-          // Start countdown for automatic redirect
-          const countdownInterval = setInterval(() => {
-            setCountdown(prev => {
-              if (prev <= 1) {
-                clearInterval(countdownInterval);
-                navigate('/login');
-                return 0;
-              }
-              return prev - 1;
-            });
-          }, 1000);
-          
-          // Clean up interval on unmount
-          return () => clearInterval(countdownInterval);
-        } else {
-          setVerificationStatus({
-            success: false,
-            message: data.message || 'Email verification failed. The link may be invalid or expired.'
-          });
-        }
-      } catch (error) {
+        // Clean up interval on unmount
+        return () => clearInterval(countdownInterval);
+      } catch (error: unknown) {
         console.error('Error during email verification:', error);
+        let errorMessage = 'Email verification failed. The link may be invalid or expired.';
+        
+        if (error instanceof AxiosError && error.response?.data) {
+          errorMessage = error.response.data.message || errorMessage;
+        }
+        
         setVerificationStatus({
           success: false,
-          message: 'An error occurred during verification. Please try again later.'
+          message: errorMessage
         });
       } finally {
         setIsVerifying(false);

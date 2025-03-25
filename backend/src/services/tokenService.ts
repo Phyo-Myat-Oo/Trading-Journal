@@ -94,7 +94,12 @@ export const generateRefreshToken = async (
     familyCreatedAt,
     rotationCounter,
     userAgent: req?.headers['user-agent'],
-    ipAddress: req?.ip || req?.connection.remoteAddress
+    ipAddress: req?.ip || req?.connection.remoteAddress,
+    absoluteSessionStart: familyOptions?.parentJti ? 
+      // If this is a refresh, get the original session start time from the parent token
+      (await RefreshToken.findOne({ jti: familyOptions.parentJti }))?.absoluteSessionStart || new Date() :
+      // If this is a new session, use current time
+      new Date()
   });
   
   return { token, expiresAt };
@@ -129,6 +134,36 @@ export const verifyRefreshToken = async (token: string): Promise<{
         jti: decoded.jti,
         familyId: decoded.fid || '',
         isValid: false
+      };
+    }
+
+    // Check for absolute session timeout
+    const absoluteTimeoutMs = parseDuration(config.jwt.absoluteSessionTimeout as string);
+    const sessionAge = Date.now() - tokenDoc.absoluteSessionStart.getTime();
+    
+    if (sessionAge > absoluteTimeoutMs) {
+      // Revoke token and require full authentication
+      await RefreshToken.revokeToken(decoded.jti);
+      await TokenEvent.create({
+        userId: tokenDoc.userId,
+        familyId: tokenDoc.familyId,
+        eventType: 'ABSOLUTE_TIMEOUT',
+        details: {
+          reason: 'Absolute session timeout reached',
+          sessionAge: sessionAge,
+          absoluteTimeout: absoluteTimeoutMs,
+          sessionStartTime: tokenDoc.absoluteSessionStart,
+          tokenJti: decoded.jti
+        }
+      });
+      
+      return {
+        userId: new Types.ObjectId(decoded.id),
+        jti: decoded.jti,
+        familyId: tokenDoc.familyId,
+        isValid: false,
+        requiresFullAuth: true,
+        rotationCounter: tokenDoc.rotationCounter
       };
     }
     

@@ -22,6 +22,7 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().optional(),
   JWT_REFRESH_EXPIRES_IN: z.string().optional(),
   JWT_ACCESS_EXPIRES_IN: z.string().optional(),
+  ABSOLUTE_SESSION_TIMEOUT: z.string().default('24h'),
   
   // CORS
   ALLOWED_ORIGINS: z.string().optional(),
@@ -77,6 +78,7 @@ export const config = {
     refreshSecret: envVars.JWT_REFRESH_SECRET || envVars.JWT_SECRET,
     refreshExpiresIn: envVars.JWT_REFRESH_EXPIRES_IN || '7d',
     accessExpiresIn: envVars.JWT_ACCESS_EXPIRES_IN || '15m',
+    absoluteSessionTimeout: envVars.ABSOLUTE_SESSION_TIMEOUT,
   },
   
   cors: {

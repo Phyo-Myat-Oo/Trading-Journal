@@ -44,6 +44,12 @@ class EmailService {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
         },
+        tls: {
+          // Do not fail on invalid certs
+          rejectUnauthorized: false,
+          // Use TLS 1.2
+          minVersion: 'TLSv1.2'
+        }
       });
     }
   }

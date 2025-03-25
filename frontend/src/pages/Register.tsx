@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import LazyPasswordStrengthBar from '../components/auth/LazyPasswordStrengthBar';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -183,6 +184,12 @@ const Register = () => {
                   formErrors.password ? 'border-red-300' : 'border-gray-300'
                 } placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
                 placeholder="Password"
+              />
+              <LazyPasswordStrengthBar 
+                password={formData.password} 
+                minLength={8}
+                scoreWords={['Weak', 'Weak', 'Okay', 'Good', 'Strong']}
+                shortScoreWord="Too short"
               />
               {formErrors.password && (
                 <p className="mt-1 text-sm text-red-600">{formErrors.password}</p>

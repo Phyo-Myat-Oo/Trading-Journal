@@ -29,21 +29,23 @@ export enum TokenState {
   EXPIRED = 'EXPIRED',
   ERROR = 'ERROR',
   INITIALIZING = 'INITIALIZING',
-  REVOKED = 'REVOKED'
+  REVOKED = 'REVOKED',
+  ABSOLUTE_TIMEOUT = 'ABSOLUTE_TIMEOUT'
 }
 
 export enum TokenEventType {
   TOKEN_INITIALIZED = 'tokenInitialized',
   TOKEN_REFRESH = 'tokenRefresh',
-  TOKEN_EXPIRING = 'tokenExpiring',
   TOKEN_EXPIRED = 'tokenExpired',
-  TOKEN_ERROR = 'tokenError',
+  TOKEN_EXPIRING = 'tokenExpiring',
   TOKEN_REVOKED = 'tokenRevoked',
+  TOKEN_ERROR = 'tokenError',
   TOKEN_STATE_CHANGE = 'tokenStateChange',
   REFRESH_STARTED = 'refreshStarted',
   REFRESH_SUCCEEDED = 'refreshSucceeded',
   REFRESH_FAILED = 'refreshFailed',
-  QUEUE_UPDATE = 'queueUpdate'
+  QUEUE_UPDATE = 'queueUpdate',
+  ABSOLUTE_TIMEOUT = 'absoluteTimeout'
 }
 
 export interface RefreshRequest {
@@ -74,6 +76,7 @@ export interface TokenManagerEvents {
   onRefreshFailed?: (error: Error) => void;
   onError?: (error: Error) => void;
   onQueueUpdate?: (queueSize: number) => void;
+  onAbsoluteTimeout?: () => void;
 }
 
 export interface TokenInfo extends JwtPayload {
@@ -111,15 +114,20 @@ export class TokenError extends Error {
 }
 
 export enum TokenErrorCode {
-  REFRESH_FAILED = 'REFRESH_FAILED',
-  NETWORK_ERROR = 'NETWORK_ERROR',
   INVALID_TOKEN = 'INVALID_TOKEN',
   EXPIRED_TOKEN = 'EXPIRED_TOKEN',
+  TOKEN_VERIFICATION_FAILED = 'TOKEN_VERIFICATION_FAILED',
+  REFRESH_FAILED = 'REFRESH_FAILED',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  REFRESH_LOCKED = 'REFRESH_LOCKED',
   SERVER_ERROR = 'SERVER_ERROR',
-  UNAUTHORIZED = 'UNAUTHORIZED',
+  QUEUE_FULL = 'QUEUE_FULL',
+  CIRCUIT_BREAKER_OPEN = 'CIRCUIT_BREAKER_OPEN',
   CIRCUIT_BREAKER_TRIPPED = 'CIRCUIT_BREAKER_TRIPPED',
-  MAX_RETRIES_EXCEEDED = 'MAX_RETRIES_EXCEEDED',
   TOKEN_REVOKED = 'TOKEN_REVOKED',
+  ABSOLUTE_TIMEOUT = 'ABSOLUTE_TIMEOUT',
+  UNAUTHORIZED = 'UNAUTHORIZED',
+  MAX_RETRIES_EXCEEDED = 'MAX_RETRIES_EXCEEDED',
   UNKNOWN_ERROR = 'UNKNOWN_ERROR'
 }
 

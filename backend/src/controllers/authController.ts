@@ -704,7 +704,8 @@ export const revokeSession = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'User not authenticated' });
     }
 
-    const { sessionId } = req.params;
+    // Get session ID from either params (DELETE request) or body (POST request)
+    const sessionId = req.params.sessionId || req.body.jti;
     
     if (!sessionId) {
       return res.status(400).json({ 

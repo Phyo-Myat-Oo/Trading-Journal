@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import authService from '../services/authService';
+import LazyPasswordStrengthBar from '../components/auth/LazyPasswordStrengthBar';
 
 const ResetPassword = () => {
   const { token } = useParams<{ token: string }>();
@@ -161,6 +162,16 @@ const ResetPassword = () => {
                   placeholder="New Password"
                 />
               </div>
+              
+              <div className="px-3 py-2 border-l border-r border-gray-300">
+                <LazyPasswordStrengthBar 
+                  password={password} 
+                  minLength={8}
+                  scoreWords={['Weak', 'Weak', 'Okay', 'Good', 'Strong']}
+                  shortScoreWord="Too short"
+                />
+              </div>
+              
               <div>
                 <label htmlFor="confirmPassword" className="sr-only">Confirm Password</label>
                 <input

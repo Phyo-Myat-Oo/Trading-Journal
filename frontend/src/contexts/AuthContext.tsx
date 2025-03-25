@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { AxiosError } from 'axios';
 import authService, { LoginData, RegisterData, AuthResponse } from '../services/authService';
 import { checkOnlineStatus, subscribeToNetworkStatus } from '../utils/auth';
@@ -7,11 +7,12 @@ import { TokenEventType } from '../types/token';
 import { jwtDecode } from 'jwt-decode';
 import type { JwtPayload } from 'jwt-decode';
 import SessionExpirationDialog from '../components/auth/SessionExpirationDialog';
+import { useToast } from '../providers/ToastProvider';
 
 // Add a simple debug logging function to control verbosity
-const debugLog = (message: string, data?: unknown) => {
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`[Auth] ${message}`, data || '');
+const debugLog = (...args: unknown[]) => {
+  if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') {
+    console.log('[AuthContext]', ...args);
   }
 };
 
@@ -95,6 +96,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   
   // Initialize TokenManager
   const tokenManagerRef = useRef<TokenManager>(TokenManager.getInstance());
+  const toast = useToast();
+
+  // Handle token refresh
+  const refreshToken = useCallback(async (): Promise<boolean> => {
+    try {
+      setTokenRefreshAttempts(prev => prev + 1);
+      const newToken = await tokenManagerRef.current.refresh();
+      return !!newToken; // Convert to boolean for compatibility
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      return false;
+    }
+  }, []);
 
   // Setup network status listener
   useEffect(() => {
@@ -154,6 +168,31 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const handleExpirationDialogClose = () => {
     setShowExpirationDialog(false);
   };
+
+  // Handle absolute timeout event
+  const handleAbsoluteTimeout = useCallback(() => {
+    debugLog('TokenManager reported absolute session timeout');
+    
+    // Close any open dialogs
+    setShowExpirationDialog(false);
+    
+    // Clear auth state
+    setAuthState('unauthenticated');
+    setUser(null);
+    
+    // Show notification to user
+    toast.showToast({
+      message: 'Your session has expired for security reasons. Please log in again.',
+      type: 'info',
+      duration: 5000,
+      position: 'top-center'
+    });
+    
+    // Redirect to login page using window.location
+    const currentPath = window.location.pathname;
+    const loginUrl = `/login?redirectTo=${encodeURIComponent(currentPath)}&reason=absolute_timeout`;
+    window.location.href = loginUrl;
+  }, [toast]);
 
   // Listen to TokenManager events
   useEffect(() => {
@@ -249,20 +288,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     };
     
-    // Register event listeners
+    // Subscribe to events
     tokenManager.on(TokenEventType.TOKEN_REFRESH, handleTokenRefresh);
     tokenManager.on(TokenEventType.TOKEN_EXPIRED, handleTokenExpired);
     tokenManager.on(TokenEventType.TOKEN_EXPIRING, handleTokenExpiring);
     tokenManager.on(TokenEventType.TOKEN_ERROR, handleTokenError);
-    
-    // Clean up on unmount
+    tokenManager.on(TokenEventType.ABSOLUTE_TIMEOUT, handleAbsoluteTimeout);
+
+    // Cleanup subscriptions
     return () => {
       tokenManager.off(TokenEventType.TOKEN_REFRESH, handleTokenRefresh);
       tokenManager.off(TokenEventType.TOKEN_EXPIRED, handleTokenExpired);
       tokenManager.off(TokenEventType.TOKEN_EXPIRING, handleTokenExpiring);
       tokenManager.off(TokenEventType.TOKEN_ERROR, handleTokenError);
+      tokenManager.off(TokenEventType.ABSOLUTE_TIMEOUT, handleAbsoluteTimeout);
     };
-  }, [isOnline, tokenRefreshAttempts, showExpirationDialog]);
+  }, [showExpirationDialog, isOnline, refreshToken, toast, handleAbsoluteTimeout]);
 
   // Set up token refresh mechanism
   useEffect(() => {
@@ -495,46 +536,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setTimeout(() => {
         setIsLoggingOut(false);
       }, 1000);
-    }
-  };
-
-  const refreshToken = async (): Promise<boolean> => {
-    try {
-      setAuthState('refreshing');
-      // Use authService.refreshToken which now delegates to TokenManager
-      const success = await authService.refreshToken();
-      if (success) {
-        // Update auth state on success
-        setAuthState('authenticated');
-        // Reset refresh attempts on success
-        setTokenRefreshAttempts(0);
-      } else {
-        // Increment refresh attempts on failure
-        setTokenRefreshAttempts(prev => prev + 1);
-        
-        // Update state based on network status
-        if (!isOnline && tokenRefreshAttempts < 3) {
-          // Keep authenticated when offline for a grace period
-          setAuthState('authenticated');
-        } else {
-          setAuthState('unauthenticated');
-        }
-      }
-      return success;
-    } catch (error) {
-      console.error('Error refreshing token:', error);
-      // Increment refresh attempts on error
-      setTokenRefreshAttempts(prev => prev + 1);
-      
-      // Update auth state based on network status and retry count
-      if (!isOnline && tokenRefreshAttempts < 3) {
-        // Keep authenticated when offline for a grace period
-        setAuthState('authenticated');
-      } else {
-        setAuthState('unauthenticated');
-      }
-      
-      return false;
     }
   };
 

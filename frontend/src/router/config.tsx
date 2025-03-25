@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Outlet } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
 import { Dashboard } from '../pages/Dashboard';
 import Stats from '../pages/Stats';
@@ -18,84 +18,97 @@ import NotFound from '../pages/NotFound';
 import { RoleBasedRoute } from '../components/common/auth/RoleBasedRoute';
 import { ProtectedRoute } from '../components/common/auth/ProtectedRoute';
 import { TokenDebug } from '../components/debug/TokenDebug';
+import { AuthProvider } from '../contexts/AuthContext';
+
+// Create a root component that wraps everything with AuthProvider
+const Root = () => (
+  <AuthProvider>
+    <Outlet />
+  </AuthProvider>
+);
 
 export const router = createBrowserRouter([
   {
-    path: '/',
-    element: (
-      <ProtectedRoute>
-        <Layout />
-      </ProtectedRoute>
-    ),
+    element: <Root />,
     children: [
       {
-        index: true,
-        element: <Dashboard />
-      },
-      {
-        path: 'trades',
-        element: <Trades />
-      },
-      {
-        path: 'journal',
-        element: <Journal />
-      },
-      {
-        path: 'stats',
-        element: <Stats />
-      },
-      {
-        path: 'calendar',
-        element: <Calendar />
-      },
-      {
-        path: 'settings',
-        element: <Settings />
-      },
-      {
-        path: 'security',
-        element: <SecuritySettings />
-      },
-      {
-        path: 'help',
-        element: <Help />
-      },
-      {
-        path: 'admin',
+        path: '/',
         element: (
-          <RoleBasedRoute allowedRoles={['admin']}>
-            <Admin />
-          </RoleBasedRoute>
-        )
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        ),
+        children: [
+          {
+            index: true,
+            element: <Dashboard />
+          },
+          {
+            path: 'trades',
+            element: <Trades />
+          },
+          {
+            path: 'journal',
+            element: <Journal />
+          },
+          {
+            path: 'stats',
+            element: <Stats />
+          },
+          {
+            path: 'calendar',
+            element: <Calendar />
+          },
+          {
+            path: 'settings',
+            element: <Settings />
+          },
+          {
+            path: 'security',
+            element: <SecuritySettings />
+          },
+          {
+            path: 'help',
+            element: <Help />
+          },
+          {
+            path: 'admin',
+            element: (
+              <RoleBasedRoute allowedRoles={['admin']}>
+                <Admin />
+              </RoleBasedRoute>
+            )
+          }
+        ]
+      },
+      {
+        path: '/login',
+        element: <Login />
+      },
+      {
+        path: '/register',
+        element: <Register />
+      },
+      {
+        path: '/forgot-password',
+        element: <ForgotPassword />
+      },
+      {
+        path: '/reset-password/:token',
+        element: <ResetPassword />
+      },
+      {
+        path: '/verify-email/:token',
+        element: <VerifyEmail />
+      },
+      {
+        path: '/debug/token',
+        element: <TokenDebug />
       },
       {
         path: '*',
         element: <NotFound />
       }
     ]
-  },
-  {
-    path: '/login',
-    element: <Login />
-  },
-  {
-    path: '/register',
-    element: <Register />
-  },
-  {
-    path: '/forgot-password',
-    element: <ForgotPassword />
-  },
-  {
-    path: '/reset-password/:token',
-    element: <ResetPassword />
-  },
-  {
-    path: '/verify-email/:token',
-    element: <VerifyEmail />
-  },
-  {
-    path: '/debug/token',
-    element: <TokenDebug />
   }
 ]); 

@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
 import { ToastProvider } from './providers/ToastProvider';
 import { MantineProvider, createTheme } from '@mantine/core';
-import { AuthProvider } from './contexts/AuthContext';
 import { router } from './router/config.tsx';
 import { ErrorBoundary } from './components/common/feedback/ErrorBoundary';
 import authService from './services/authService';
@@ -80,11 +79,9 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <MantineProvider theme={theme}>
-          <AuthProvider>
-            <ToastProvider>
-              <RouterProvider router={router} />
-            </ToastProvider>
-          </AuthProvider>
+          <ToastProvider>
+            <RouterProvider router={router} />
+          </ToastProvider>
         </MantineProvider>
       </QueryClientProvider>
     </ErrorBoundary>

@@ -300,6 +300,15 @@ export class TokenManager extends EventEmitter {
   }
 
   /**
+   * Refresh the current token
+   * @param priority Priority of the refresh request
+   * @returns Promise that resolves to the new token or null if refresh failed
+   */
+  public async refresh(priority: 'high' | 'normal' | 'low' = 'high'): Promise<string | null> {
+    return this.refreshToken(priority);
+  }
+
+  /**
    * Manually trigger a token refresh
    * @param priority Priority of the refresh request
    * @returns Promise resolving to the new token or null if refresh failed
@@ -823,6 +832,15 @@ export class TokenManager extends EventEmitter {
       } else if (state === TokenState.EXPIRING_SOON && prevState !== TokenState.EXPIRING_SOON) {
         const timeToExpiration = this.getTimeToExpiration();
         this.emit(TokenEventType.TOKEN_EXPIRING, timeToExpiration);
+      } else if (state === TokenState.ABSOLUTE_TIMEOUT) {
+        // Clear token and stop refresh timer on absolute timeout
+        this.token = null;
+        localStorage.removeItem('token');
+        if (this.refreshTimer) {
+          clearTimeout(this.refreshTimer);
+          this.refreshTimer = null;
+        }
+        this.emit(TokenEventType.ABSOLUTE_TIMEOUT);
       }
       
       // Always emit state change
@@ -831,7 +849,8 @@ export class TokenManager extends EventEmitter {
       // Broadcast state to other tabs for significant changes
       if (state === TokenState.VALID || 
           state === TokenState.EXPIRED || 
-          state === TokenState.REVOKED) {
+          state === TokenState.REVOKED ||
+          state === TokenState.ABSOLUTE_TIMEOUT) {
         this.broadcastTokenState();
       }
     }

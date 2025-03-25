@@ -16,6 +16,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@mantine/notifications'],
+    include: ['prop-types']
   },
   server: {
     port: 5173,

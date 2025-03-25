@@ -15,6 +15,7 @@ export interface IRefreshToken extends Document {
   parentJti: string | null; // Links to the previous token in the chain
   familyCreatedAt: Date; // When this token family was first created
   rotationCounter: number; // Number of times tokens in this family have been rotated
+  absoluteSessionStart: Date; // When the initial session started (for absolute timeout)
 }
 
 // Define static methods interface
@@ -80,6 +81,12 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
     rotationCounter: {
       type: Number,
       default: 0,
+    },
+    absoluteSessionStart: {
+      type: Date,
+      required: true,
+      index: true,
+      default: Date.now,
     },
   },
   {

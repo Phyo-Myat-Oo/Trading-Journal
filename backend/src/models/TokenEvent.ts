@@ -9,7 +9,8 @@ export type TokenEventType =
   | 'LOGIN_FAILED'
   | 'LOGOUT'
   | 'TOKEN_REFRESH'
-  | 'TOKEN_REVOKED';
+  | 'TOKEN_REVOKED'
+  | 'ABSOLUTE_TIMEOUT';
 
 export interface ITokenEvent extends Document {
   userId: Types.ObjectId;
@@ -51,7 +52,8 @@ const tokenEventSchema = new Schema<ITokenEvent>(
         'LOGIN_FAILED',
         'LOGOUT',
         'TOKEN_REFRESH',
-        'TOKEN_REVOKED'
+        'TOKEN_REVOKED',
+        'ABSOLUTE_TIMEOUT'
       ]
     },
     details: {

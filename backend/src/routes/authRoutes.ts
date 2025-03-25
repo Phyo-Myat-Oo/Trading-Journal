@@ -309,6 +309,36 @@ router.get('/sessions', authenticate, asyncHandler(getUserSessions));
  */
 router.delete('/sessions/:sessionId', authenticate, asyncHandler(revokeSession));
 
+/**
+ * @swagger
+ * /api/auth/sessions/revoke:
+ *   post:
+ *     summary: Terminate a specific session
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - jti
+ *             properties:
+ *               jti:
+ *                 type: string
+ *                 description: The JTI of the session to terminate
+ *     responses:
+ *       200:
+ *         description: Session terminated successfully
+ *       401:
+ *         description: Unauthorized - User not authenticated
+ *       404:
+ *         description: Session not found or already terminated
+ */
+router.post('/sessions/revoke', authenticate, asyncHandler(revokeSession));
+
 // Check user permissions for a resource
 // Temporarily commenting out until checkPermission is implemented
 // router.post('/check-permission', authenticate, asyncHandler(checkPermission));
