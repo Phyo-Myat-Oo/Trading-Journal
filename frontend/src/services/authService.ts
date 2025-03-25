@@ -23,6 +23,7 @@ export interface RegisterData {
 export interface LoginData {
   email: string;
   password: string;
+  rememberMe?: boolean;
 }
 
 export interface AuthResponse {
@@ -221,9 +222,15 @@ const register = async (userData: RegisterData): Promise<AuthResponse> => {
 
 const login = async (userData: LoginData): Promise<AuthResponse> => {
   console.log('Attempting login with:', userData.email);
+  console.log('Remember Me enabled:', userData.rememberMe ?? false);
+  
   try {
     console.log('Making POST request to /api/auth/login');
-    const response = await api.post('/api/auth/login', userData, { 
+    const response = await api.post('/api/auth/login', {
+      email: userData.email,
+      password: userData.password,
+      rememberMe: userData.rememberMe
+    }, { 
       withCredentials: true,
       headers: {
         'Content-Type': 'application/json'

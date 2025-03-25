@@ -410,6 +410,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setTwoFactorPendingUserId(null);
       
       console.log('AuthContext: Calling login service');
+      
+      // Set remember me preference in TokenManager if provided
+      if (data.rememberMe !== undefined) {
+        console.log('AuthContext: Setting Remember Me preference:', data.rememberMe);
+        tokenManagerRef.current.setRememberMe(data.rememberMe);
+      }
+      
       const response = await authService.login(data);
       console.log('AuthContext: Login response received', response);
       

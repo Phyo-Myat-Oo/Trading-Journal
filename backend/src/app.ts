@@ -31,6 +31,8 @@ import cookieParser from 'cookie-parser';
 import * as tokenService from './services/tokenService';
 import { apiRateLimiter, ipRateLimiter } from './middleware/rateLimitMiddleware';
 import { csrfProtection, handleCsrfError } from './middleware/csrfMiddleware';
+import session from 'express-session';
+import { configurePassport } from './config/passport';
 
 // Load environment variables
 dotenv.config();
@@ -72,6 +74,22 @@ app.use(helmet());
 
 // Parse cookies
 app.use(cookieParser());
+
+// Express session middleware - required for Passport
+app.use(session({
+  secret: config.jwt.secret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: config.isProduction,
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Initialize and configure Passport
+const passport = configurePassport();
+app.use(passport.initialize());
 
 // Parse JSON request bodies
 app.use(express.json({ limit: '10mb' }));

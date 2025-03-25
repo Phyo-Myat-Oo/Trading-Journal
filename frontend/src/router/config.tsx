@@ -19,6 +19,7 @@ import { RoleBasedRoute } from '../components/common/auth/RoleBasedRoute';
 import { ProtectedRoute } from '../components/common/auth/ProtectedRoute';
 import { TokenDebug } from '../components/debug/TokenDebug';
 import { AuthProvider } from '../contexts/AuthContext';
+import OAuthCallback from '../pages/OAuthCallback';
 
 // Create a root component that wraps everything with AuthProvider
 const Root = () => (
@@ -100,6 +101,10 @@ export const router = createBrowserRouter([
       {
         path: '/verify-email/:token',
         element: <VerifyEmail />
+      },
+      {
+        path: '/oauth-callback',
+        element: <OAuthCallback />
       },
       {
         path: '/debug/token',

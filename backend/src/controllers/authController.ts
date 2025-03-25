@@ -12,6 +12,7 @@ import { CookieOptions } from 'express';
 import * as tokenService from '../services/tokenService';
 import { PasswordReset } from '../models/PasswordReset';
 import speakeasy from 'speakeasy';
+import { generateTokensForGoogleUser } from '../services/oauthService';
 
 /**
  * Register a new user
@@ -84,7 +85,7 @@ export const login = async (req: Request, res: Response) => {
   try {
     // Validate input using Zod schema
     const validatedData = loginSchema.parse(req.body);
-    const { email, password } = validatedData;
+    const { email, password, rememberMe } = validatedData;
 
     // Find user by email
     const user = await User.findOne({ email });
@@ -215,7 +216,9 @@ export const login = async (req: Request, res: Response) => {
     const accessToken = tokenService.generateAccessToken(user);
     
     // Generate refresh token with context information
-    const { token: refreshToken, expiresAt } = await tokenService.generateRefreshToken(user, req);
+    const { token: refreshToken, expiresAt } = await tokenService.generateRefreshToken(user, req, {
+      extendedExpiration: rememberMe
+    });
 
     // Set refresh token in HTTP-only cookie
     const cookieOptions = {
@@ -822,6 +825,51 @@ export const verifyTwoFactorLogin = async (req: Request, res: Response) => {
       success: false, 
       message: 'Server error during 2FA verification' 
     });
+  }
+};
+
+/**
+ * Handle Google OAuth authentication
+ * @route GET /api/auth/google/callback
+ */
+export const handleGoogleAuthCallback = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication failed' });
+    }
+    
+    // Generate tokens for the authenticated Google user
+    const user = req.user as IUser;
+    const result = await generateTokensForGoogleUser(user, req);
+    
+    // Set refresh token in HTTP-only cookie
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: result.expiresAt.getTime() - Date.now() // Use actual expiration time from token
+    };
+    
+    res.cookie('refreshToken', result.refreshToken, cookieOptions as CookieOptions);
+    
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+    
+    // Redirect to frontend with access token
+    const frontendUrl = config.frontendUrl;
+    
+    res.redirect(`${frontendUrl}/oauth-callback?` + 
+      `token=${encodeURIComponent(result.accessToken)}` +
+      `&firstName=${encodeURIComponent(user.firstName)}` + 
+      `&lastName=${encodeURIComponent(user.lastName)}` +
+      `&email=${encodeURIComponent(user.email)}`
+    );
+  } catch (error) {
+    console.error('Google auth callback error:', error);
+    const frontendUrl = config.frontendUrl;
+    res.redirect(`${frontendUrl}/login?error=auth_failed`);
   }
 };
 

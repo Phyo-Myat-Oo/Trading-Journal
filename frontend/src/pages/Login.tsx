@@ -6,6 +6,7 @@ import TwoFactorVerify from '../components/auth/TwoFactorVerify';
 import { AuthResponse } from '../services/authService';
 import EmailVerificationBanner from '../components/auth/EmailVerificationBanner';
 import authService from '../services/authService';
+import GoogleLoginButton from '../components/auth/GoogleLoginButton';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -24,10 +25,21 @@ const Login = () => {
   const [resendSuccess, setResendSuccess] = useState(false);
   const [resendError, setResendError] = useState('');
   
+  // Remember Me state
+  const [rememberMe, setRememberMe] = useState(false);
+  
   // 2FA states
   const [requireTwoFactor, setRequireTwoFactor] = useState(false);
   const [tempUserId, setTempUserId] = useState('');
   
+  // Load previous Remember Me setting
+  useEffect(() => {
+    const savedPreference = localStorage.getItem('remember_me');
+    if (savedPreference) {
+      setRememberMe(savedPreference === 'true');
+    }
+  }, []);
+
   // Check for existing 2FA verification state on mount
   useEffect(() => {
     if (twoFactorRequired && twoFactorPendingUserId) {
@@ -151,6 +163,11 @@ const Login = () => {
     }
   };
 
+  // Handle Remember Me checkbox changes
+  const handleRememberMeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRememberMe(e.target.checked);
+  };
+
   // Create a button click handler that bypasses form submission
   const handleButtonClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -175,12 +192,17 @@ const Login = () => {
     
     try {
       console.log('Attempting login for:', formData.email);
+      console.log('Remember Me enabled:', rememberMe);
       console.log('API URL:', import.meta.env.VITE_API_URL);
+      
+      // Store rememberMe preference in localStorage
+      localStorage.setItem('remember_me', rememberMe.toString());
       
       // Use the context login function which updates auth state and returns success/failure
       const loginResponse = await login({
         email: formData.email,
-        password: formData.password
+        password: formData.password,
+        rememberMe: rememberMe
       });
       
       console.log('Login result:', loginResponse);
@@ -423,6 +445,8 @@ const Login = () => {
                 name="remember-me"
                 type="checkbox"
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                checked={rememberMe}
+                onChange={handleRememberMeChange}
               />
               <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
                 Remember me
@@ -447,6 +471,21 @@ const Login = () => {
             >
               {isSubmitting ? 'Signing in...' : 'Sign in'}
             </button>
+          </div>
+          
+          <div className="mt-4 relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-300"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white text-gray-500">
+                Or continue with
+              </span>
+            </div>
+          </div>
+          
+          <div className="mt-4">
+            <GoogleLoginButton />
           </div>
         </form>
       </div>

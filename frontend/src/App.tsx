@@ -6,6 +6,7 @@ import { MantineProvider, createTheme } from '@mantine/core';
 import { router } from './router/config.tsx';
 import { ErrorBoundary } from './components/common/feedback/ErrorBoundary';
 import authService from './services/authService';
+import GoogleAuthProvider from './providers/GoogleAuthProvider';
  
 import './styles/dateSlider.css';
  
@@ -80,7 +81,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <MantineProvider theme={theme}>
           <ToastProvider>
-            <RouterProvider router={router} />
+            <GoogleAuthProvider>
+              <RouterProvider router={router} />
+            </GoogleAuthProvider>
           </ToastProvider>
         </MantineProvider>
       </QueryClientProvider>

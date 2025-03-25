@@ -1,4 +1,4 @@
-import { register, login, requestPasswordReset, resetPassword, refreshToken, logout, checkCookies, verifyEmail, resendVerification, getUserSessions, revokeSession } from '../controllers/authController';
+import { register, login, requestPasswordReset, resetPassword, refreshToken, logout, checkCookies, verifyEmail, resendVerification, getUserSessions, revokeSession, handleGoogleAuthCallback } from '../controllers/authController';
 import { validateRequest } from '../middleware/validateRequest';
 import { loginSchema, registerSchema, forgotPasswordSchema, updatePasswordSchema } from '../schemas/authSchema';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 import { loginRateLimiter, passwordResetRateLimiter, registrationRateLimiter, tokenRefreshLimiter } from '../middleware/rateLimitMiddleware';
 import { csrfProtection, getCsrfToken } from '../middleware/csrfMiddleware';
 import { verifyTwoFactorLogin, verifyBackupCode } from '../controllers/twoFactorController';
+import passport from 'passport';
 
 const router = Router();
 
@@ -694,5 +695,40 @@ router.post('/2fa/verify', asyncHandler(verifyTwoFactorLogin));
  * @route POST /api/auth/2fa/backup
  */
 router.post('/2fa/backup', asyncHandler(verifyBackupCode));
+
+/**
+ * @swagger
+ * /api/auth/google:
+ *   get:
+ *     summary: Authenticate with Google
+ *     tags: [Authentication]
+ *     description: Initiates the Google OAuth authentication flow
+ *     responses:
+ *       302:
+ *         description: Redirects to Google authentication page
+ */
+router.get('/google', passport.authenticate('google', {
+  scope: ['profile', 'email'],
+  prompt: 'select_account'
+}));
+
+/**
+ * @swagger
+ * /api/auth/google/callback:
+ *   get:
+ *     summary: Google OAuth callback
+ *     tags: [Authentication]
+ *     description: Callback endpoint for Google OAuth authentication
+ *     responses:
+ *       302:
+ *         description: Redirects to frontend after successful authentication
+ */
+router.get('/google/callback', 
+  passport.authenticate('google', { 
+    failureRedirect: '/login',
+    session: false
+  }),
+  asyncHandler(handleGoogleAuthCallback)
+);
 
 export default router; 

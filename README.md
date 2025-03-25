@@ -204,3 +204,34 @@ npm test
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Setting Up Google OAuth
+
+To enable Google OAuth for social login, follow these steps:
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Navigate to "APIs & Services" > "Credentials"
+4. Click "Create Credentials" and select "OAuth client ID"
+5. Configure the OAuth consent screen:
+   - Select "External" user type
+   - Fill in the required information (app name, user support email, developer contact information)
+   - Add authorized domains
+6. Create OAuth client ID:
+   - Select "Web application" as application type
+   - Add authorized JavaScript origins (e.g., `http://localhost:5173` for development)
+   - Add authorized redirect URIs (e.g., `http://localhost:5000/api/auth/google/callback` for development)
+7. Copy the generated Client ID and Client Secret
+8. Add these values to your environment variables:
+   - Backend: Add to `.env` file:
+     ```
+     GOOGLE_CLIENT_ID=your_client_id
+     GOOGLE_CLIENT_SECRET=your_client_secret
+     GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
+     ```
+   - Frontend: Add to `.env` file:
+     ```
+     VITE_GOOGLE_CLIENT_ID=your_client_id
+     ```
+
+Restart both backend and frontend servers after adding the environment variables.

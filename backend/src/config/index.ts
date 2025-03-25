@@ -22,7 +22,13 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().optional(),
   JWT_REFRESH_EXPIRES_IN: z.string().optional(),
   JWT_ACCESS_EXPIRES_IN: z.string().optional(),
+  JWT_EXTENDED_REFRESH_EXPIRES_IN: z.string().optional(),
   ABSOLUTE_SESSION_TIMEOUT: z.string().default('24h'),
+  
+  // Google OAuth
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALLBACK_URL: z.string().optional(),
   
   // CORS
   ALLOWED_ORIGINS: z.string().optional(),
@@ -85,6 +91,16 @@ export const config = {
     refreshExpiresIn: envVars.JWT_REFRESH_EXPIRES_IN || '7d',
     accessExpiresIn: envVars.JWT_ACCESS_EXPIRES_IN || '15m',
     absoluteSessionTimeout: envVars.ABSOLUTE_SESSION_TIMEOUT,
+    extendedRefreshExpiresIn: envVars.JWT_EXTENDED_REFRESH_EXPIRES_IN || '7d',
+  },
+  
+  // Add Google OAuth config
+  oauth: {
+    google: {
+      clientID: envVars.GOOGLE_CLIENT_ID || '',
+      clientSecret: envVars.GOOGLE_CLIENT_SECRET || '',
+      callbackURL: envVars.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback',
+    },
   },
   
   cors: {

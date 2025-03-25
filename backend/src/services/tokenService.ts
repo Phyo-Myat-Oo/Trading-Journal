@@ -48,6 +48,7 @@ interface TokenFamilyOptions {
   parentJti?: string;
   familyCreatedAt?: Date;
   rotationCounter?: number;
+  extendedExpiration?: boolean; // Flag for "Remember Me" extended expiration
 }
 
 // Generate and store refresh token
@@ -65,7 +66,11 @@ export const generateRefreshToken = async (
   const rotationCounter = (familyOptions?.rotationCounter || 0) + (familyOptions?.parentJti ? 1 : 0);
   
   // Calculate expiration time
-  const expirationMs = parseDuration(config.jwt.refreshExpiresIn as string);
+  const refreshExpiresIn = familyOptions?.extendedExpiration ? 
+    (config.jwt.extendedRefreshExpiresIn || '7d') : 
+    (config.jwt.refreshExpiresIn as string);
+  
+  const expirationMs = parseDuration(refreshExpiresIn);
   const expiresAt = new Date(Date.now() + expirationMs);
   
   // Create the token
@@ -80,7 +85,7 @@ export const generateRefreshToken = async (
       aud: 'trading-journal-app'
     }, 
     config.jwt.refreshSecret as jwt.Secret,
-    { expiresIn: config.jwt.refreshExpiresIn } as SignOptions
+    { expiresIn: refreshExpiresIn } as SignOptions
   );
   
   // Store token in database with family info

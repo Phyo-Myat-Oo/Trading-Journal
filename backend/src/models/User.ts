@@ -29,6 +29,12 @@ export interface IUser extends Document {
   twoFactorTempSecret?: string;
   name?: string;
   phone?: string;
+  
+  // Social login fields
+  googleId?: string;
+  profilePicture?: string;
+  provider?: 'local' | 'google';
+  
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -51,7 +57,10 @@ const userSchema = new Schema<IUser>(
     },
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      required: function() {
+        // Password is required only for local accounts
+        return this.provider === 'local' || !this.provider;
+      },
       minlength: [8, 'Password must be at least 8 characters long']
     },
     firstName: {
@@ -120,16 +129,32 @@ const userSchema = new Schema<IUser>(
       default: null
     },
     name: String,
-    phone: String
+    phone: String,
+    
+    // Social login fields
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+    profilePicture: String,
+    provider: {
+      type: String,
+      enum: ['local', 'google'],
+      default: 'local'
+    }
   },
   {
     timestamps: true,
   }
 );
 
-// Hash password before saving
+// Hash password before saving - only if password is modified and provider is local
 userSchema.pre('save', async function(this: IUser & { password: string }, next) {
-  if (!this.isModified('password')) return next();
+  // Skip password hashing for social accounts with no password
+  if (!this.isModified('password') || (!this.password && this.provider !== 'local')) {
+    return next();
+  }
   
   try {
     // Set passwordChangedAt when the password changes
