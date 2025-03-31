@@ -217,10 +217,8 @@ const Login = () => {
       // Only navigate on successful login
       if (loginResponse && loginResponse.success) {
         console.log('Login successful, navigating to home');
-        // Use a small delay to ensure state is updated before redirect
-        setTimeout(() => {
-          navigate('/');
-        }, 100);
+        // Navigate immediately without delay
+        navigate('/', { replace: true });
       } else {
         console.log('Login failed, staying on login page');
         // Clear only the password field
@@ -310,10 +308,8 @@ const Login = () => {
   const handleTwoFactorSuccess = (response: AuthResponse) => {
     console.log('2FA verification successful:', response);
     
-    // Redirect to home page
-    setTimeout(() => {
-      navigate('/');
-    }, 100);
+    // Navigate immediately without delay
+    navigate('/', { replace: true });
   };
   
   // Handle 2FA verification cancellation

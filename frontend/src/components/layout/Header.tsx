@@ -53,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
   onDateRangeChange,
   onMenuClick,
 }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, setUser } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -66,16 +66,37 @@ export const Header: React.FC<HeaderProps> = ({
 
   // Listen for profile updates
   useEffect(() => {
-    const handleProfileUpdate = (_event: CustomEvent<User>) => {
-      // Force a re-render of the HeaderProfileAvatar by updating its key
-      setProfileKey(prev => prev + 1);
+    const handleProfileUpdate = (event: CustomEvent<User> | StorageEvent) => {
+      let updatedUser: User | null = null;
+      
+      if (event instanceof CustomEvent) {
+        updatedUser = event.detail;
+      } else if (event instanceof StorageEvent && event.key === 'user' && event.newValue) {
+        try {
+          updatedUser = JSON.parse(event.newValue);
+        } catch (error) {
+          console.error('Error parsing user data from storage event:', error);
+          return;
+        }
+      }
+      
+      if (updatedUser) {
+        // Force a re-render of the HeaderProfileAvatar by updating its key
+        setProfileKey(prev => prev + 1);
+        // Update the user data in the AuthContext
+        setUser(updatedUser);
+      }
     };
 
+    // Listen for both custom and storage events
     window.addEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+    window.addEventListener('storage', handleProfileUpdate as EventListener);
+    
     return () => {
       window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+      window.removeEventListener('storage', handleProfileUpdate as EventListener);
     };
-  }, []);
+  }, [setUser]);
 
   const handleLogout = async () => {
     // Prevent multiple clicks

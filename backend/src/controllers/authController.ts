@@ -13,6 +13,8 @@ import * as tokenService from '../services/tokenService';
 import { PasswordReset } from '../models/PasswordReset';
 import speakeasy from 'speakeasy';
 import { generateTokensForGoogleUser } from '../services/oauthService';
+import { TokenEvent } from '../models/TokenEvent';
+import { JwtPayload } from 'jsonwebtoken';
 
 /**
  * Register a new user
@@ -583,42 +585,117 @@ export const checkCookies = async (req: Request, res: Response) => {
 };
 
 export const verifyEmail = async (req: Request, res: Response) => {
+  console.log('Verifying email with token');
+  
   try {
     const { token } = req.body;
     
     if (!token) {
-      return res.status(400).json({ message: 'Verification token is required' });
-    }
-    
-    console.log('Verifying email with token');
-    
-    // Verify token
-    let decoded;
-    try {
-      decoded = jwt.verify(token, config.jwt.secret) as { id: string };
-    } catch (tokenError) {
-      console.error('Token verification failed:', tokenError);
-      return res.status(401).json({ message: 'Invalid or expired token' });
+      return res.status(400).json({ message: 'Token is required' });
     }
 
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret') as JwtPayload;
+    
     // Find user
-    const user = await User.findById(decoded.id) as IUser & { _id: Types.ObjectId };
+    const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+
+    // Check if this is an email change verification
+    if (decoded.newEmail) {
+      console.log('Processing email change verification');
+      
+      // If the email is already changed to the new email
+      if (user.email === decoded.newEmail) {
+        // If the email is changed but not verified, verify it now
+        if (!user.isVerified) {
+          user.isVerified = true;
+          await user.save();
+          
+          return res.json({
+            success: true,
+            message: 'Email verified successfully. You can now log in with your new email.',
+            requiresLogin: true
+          });
+        }
+        
+        return res.json({
+          success: true,
+          message: 'Email has been changed and verified. You can now log in with your new email.',
+          requiresLogin: true
+        });
+      }
+      
+      // If there's no pending email change or it doesn't match, return error
+      if (!user.pendingEmail || user.pendingEmail !== decoded.newEmail) {
+        console.log('Email mismatch:', { pendingEmail: user.pendingEmail, tokenEmail: decoded.newEmail });
+        return res.status(400).json({ message: 'Invalid or expired email change request' });
+      }
+
+      console.log(`Updating email from ${user.email} to ${decoded.newEmail}`);
+      
+      // Update the email
+      const oldEmail = user.email;
+      user.email = decoded.newEmail;
+      user.pendingEmail = undefined;
+      user.verificationToken = undefined;
+      
+      // Set isVerified to false initially
+      user.isVerified = false;
+      
+      await user.save();
+
+      // Log the email change event
+      try {
+        await TokenEvent.create({
+          userId: user._id,
+          eventType: 'EMAIL_CHANGE',
+          details: {
+            oldEmail,
+            newEmail: decoded.newEmail
+          },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent')
+        });
+      } catch (error) {
+        console.error('Error logging email change event:', error);
+      }
+
+      // Now immediately verify the new email since they clicked the verification link
+      user.isVerified = true;
+      await user.save();
+
+      // Set headers to clear client-side tokens
+      res.setHeader('Clear-Site-Data', '"cookies", "storage"');
+
+      return res.json({
+        success: true,
+        message: 'Email changed and verified successfully. Please log in with your new email address.',
+        requiresLogin: true
+      });
+    }
     
-    // If user is already verified, just return success
+    // Handle initial email verification
     if (user.isVerified) {
-      return res.json({ message: 'Email already verified' });
+      return res.json({ 
+        success: true,
+        message: 'Email already verified' 
+      });
     }
 
     // Update user verification status
     user.isVerified = true;
+    user.verificationToken = undefined;
     await user.save();
     
     console.log('Email verified successfully for user:', user.email);
     
-    res.json({ message: 'Email verified successfully' });
+    res.json({ 
+      success: true,
+      message: 'Email verified successfully' 
+    });
   } catch (error) {
     console.error('Email verification error:', error);
     res.status(500).json({ message: 'Error verifying email' });

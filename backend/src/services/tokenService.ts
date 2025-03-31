@@ -287,7 +287,7 @@ export const revokeTokenFamily = async (
         await TokenEvent.create({
           userId: sampleToken.userId,
           familyId,
-          eventType: 'family_revoked',
+          eventType: 'FAMILY_REVOKED',
           details: {
             reason,
             tokenCount: result

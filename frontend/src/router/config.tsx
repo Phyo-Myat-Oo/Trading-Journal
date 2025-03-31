@@ -13,7 +13,7 @@ import Login from '../pages/Login';
 import Register from '../pages/Register';
 import ForgotPassword from '../pages/ForgotPassword';
 import ResetPassword from '../pages/ResetPassword';
-import VerifyEmail from '../pages/VerifyEmail';
+import VerifyEmailChange from '../pages/VerifyEmailChange';
 import NotFound from '../pages/NotFound';
 import { RoleBasedRoute } from '../components/common/auth/RoleBasedRoute';
 import { ProtectedRoute } from '../components/common/auth/ProtectedRoute';
@@ -28,7 +28,7 @@ const Root = () => (
   </AuthProvider>
 );
 
-export const router = createBrowserRouter([
+const router = createBrowserRouter([
   {
     element: <Root />,
     children: [
@@ -100,7 +100,11 @@ export const router = createBrowserRouter([
       },
       {
         path: '/verify-email/:token',
-        element: <VerifyEmail />
+        element: <VerifyEmailChange />
+      },
+      {
+        path: '/verify-email-change/:token',
+        element: <VerifyEmailChange />
       },
       {
         path: '/oauth-callback',
@@ -116,4 +120,6 @@ export const router = createBrowserRouter([
       }
     ]
   }
-]); 
+]);
+
+export default router; 

@@ -29,6 +29,19 @@ export interface IUser extends Document {
   twoFactorTempSecret?: string;
   name?: string;
   phone?: string;
+  timezone?: string;
+  currency?: string;
+  language?: string;
+  notifications?: {
+    email: boolean;
+    push: boolean;
+    sms: boolean;
+  };
+  
+  // Email change fields
+  pendingEmail?: string;
+  emailVerificationToken?: string;
+  emailVerificationExpires?: Date;
   
   // Social login fields
   googleId?: string;
@@ -130,6 +143,44 @@ const userSchema = new Schema<IUser>(
     },
     name: String,
     phone: String,
+    timezone: {
+      type: String,
+      default: 'UTC'
+    },
+    currency: {
+      type: String,
+      default: 'USD'
+    },
+    language: {
+      type: String,
+      default: 'en'
+    },
+    notifications: {
+      type: {
+        email: {
+          type: Boolean,
+          default: true
+        },
+        push: {
+          type: Boolean,
+          default: true
+        },
+        sms: {
+          type: Boolean,
+          default: false
+        }
+      },
+      default: {
+        email: true,
+        push: true,
+        sms: false
+      }
+    },
+    
+    // Email change fields
+    pendingEmail: String,
+    emailVerificationToken: String,
+    emailVerificationExpires: Date,
     
     // Social login fields
     googleId: {

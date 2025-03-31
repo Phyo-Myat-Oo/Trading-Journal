@@ -5,6 +5,7 @@ interface VerificationEmailParams {
   token: string;
   firstName: string;
   frontendUrl?: string;
+  isEmailChange?: boolean;
 }
 
 interface AccountLockoutEmailParams {
@@ -55,7 +56,7 @@ class EmailService {
   }
 
   async sendVerificationEmail(params: VerificationEmailParams): Promise<void> {
-    const { email, token, firstName, frontendUrl: userProvidedUrl } = params;
+    const { email, token, firstName, frontendUrl: userProvidedUrl, isEmailChange } = params;
     
     // In test mode, don't actually send emails
     if (process.env.NODE_ENV === 'test') {
@@ -65,20 +66,31 @@ class EmailService {
     
     // Use provided frontendUrl, env frontendUrl, or default
     const frontendUrl = userProvidedUrl || process.env.FRONTEND_URL || 'http://localhost:5173';
-    // Update URL format to match the frontend route structure
-    const verificationUrl = `${frontendUrl}/verify-email/${token}`;
+    
+    // Use different verification URLs based on the type of verification
+    const verificationPath = isEmailChange ? 'verify-email-change' : 'verify-email';
+    const verificationUrl = `${frontendUrl}/${verificationPath}/${token}`;
     
     console.log(`Sending verification email to ${email} with verification URL: ${verificationUrl}`);
+    
+    const subject = isEmailChange 
+      ? 'Verify your new email address - Trading Journal'
+      : 'Verify your email address - Trading Journal';
+    
+    const message = isEmailChange
+      ? `Please click the link below to verify your new email address:`
+      : `Please click the link below to verify your email address:`;
     
     await this.transporter.sendMail({
       from: process.env.SMTP_FROM || 'noreply@tradingjournal.com',
       to: email,
-      subject: 'Verify your email address',
+      subject: subject,
       html: `
         <h1>Welcome to Trading Journal, ${firstName}!</h1>
-        <p>Please click the link below to verify your email address:</p>
+        <p>${message}</p>
         <a href="${verificationUrl}">${verificationUrl}</a>
         <p>This link will expire in 24 hours.</p>
+        ${isEmailChange ? '<p>After verification, you will need to log in again with your new email address.</p>' : ''}
       `,
     });
   }

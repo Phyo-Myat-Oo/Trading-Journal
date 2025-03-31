@@ -71,7 +71,7 @@ export class TokenManager extends EventEmitter {
   private static instance: TokenManager;
   private config: TokenManagerConfig;
   private expirationConfig: TokenExpirationConfig;
-  private state: TokenState = TokenState.VALID;
+  private state: TokenState = TokenState.INITIALIZING;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshQueue: RefreshRequest[] = [];
   private isRefreshing = false;
@@ -123,11 +123,19 @@ export class TokenManager extends EventEmitter {
   private deviceType: DeviceType = 'unknown';
   private rememberMe: boolean = false;
   private lastUserActivity: number = Date.now();
+  private error: string | null = null;
   
   // ======= PUBLIC API =======
 
   public get refreshing(): boolean {
     return this.isRefreshing;
+  }
+
+  /**
+   * Get the current tab's unique identifier
+   */
+  public getTabId(): string {
+    return this.tabId;
   }
 
   private constructor(config: Partial<TokenManagerConfig> = {}, expirationConfig: Partial<TokenExpirationConfig> = {}) {
@@ -592,34 +600,10 @@ export class TokenManager extends EventEmitter {
   private async performRefresh(): Promise<void> {
     // Update user activity when refreshing token
     this.updateUserActivity();
-    
-    // Start timing the refresh operation for performance metrics
-    
-    // Check if circuit breaker is tripped
-    if (this.stats.circuitBreakerTripped) {
-      const now = Date.now();
-      // If circuit breaker timeout hasn't elapsed, abort refresh
-      if (now < (this.stats.circuitBreakerResetTime || 0)) {
-        this.emit(TokenEventType.REFRESH_FAILED, new TokenError(
-          'Circuit breaker tripped, token refresh not allowed',
-          TokenErrorCode.CIRCUIT_BREAKER_TRIPPED,
-          { resetAt: this.stats.circuitBreakerResetTime }
-        ));
-        return;
-      }
-      
-      // Reset circuit breaker
-      this.stats.circuitBreakerTripped = false;
-    }
-    
-    const lockId = `refresh_${Date.now()}`;
-    if (!this.acquireLock(lockId)) {
-      this.addToQueue({
-        timestamp: Date.now(),
-        priority: 'high',
-        retryCount: 0,
-        lockId
-      });
+
+    // Check if we're already refreshing
+    if (this.isRefreshing) {
+      debugLog('Token refresh already in progress, waiting for completion');
       return;
     }
 
@@ -661,6 +645,8 @@ export class TokenManager extends EventEmitter {
         switch (statusCode) {
           case 401:
             errorCode = TokenErrorCode.UNAUTHORIZED;
+            // Revoke token on 401
+            this.revokeToken();
             break;
           case 403:
             errorCode = TokenErrorCode.UNAUTHORIZED;
@@ -686,88 +672,27 @@ export class TokenManager extends EventEmitter {
 
       // Parse response
       const data = await response.json();
-      debugLog('Refresh response received:', { hasAccessToken: !!data.accessToken });
       
-      // Store the new access token
-      if (data.accessToken) {
-        const token = data.accessToken;
-        localStorage.setItem('token', token);
-        debugLog('New access token stored in localStorage');
-        
-        this.token = token;
-        this.clearError();
-        this.setState(TokenState.VALID);
-        this.lastRefreshTime = Date.now();
-        this.consecutiveFailures = 0;
-        
-        // Reset circuit breaker if it was approaching the threshold
-        if (this.consecutiveFailures > 0) {
-          this.consecutiveFailures = 0;
-        }
-        
-        // Decode the token to get expiration info
-        const tokenInfo = this.getTokenInfo();
-        if (tokenInfo) {
-          this.startRefreshTimer(tokenInfo);
-        }
-        
-        // Update state with the new token and refresh schedule
-        this.updateState({
-          token,
-          state: TokenState.VALID,
-          lastRefresh: Date.now(),
-          nextRefresh: this.calculateNextRefresh(token),
-          isLocked: false
-        });
-        
-        this.updateStats(startTime);
-        
-        // Emit success events
-        this.emit(TokenEventType.REFRESH_SUCCEEDED);
-        this.emit(TokenEventType.TOKEN_REFRESH, token);
-        
-        // Broadcast to other tabs
-        this.broadcastTokenState();
-        
-        return;
-      } else {
-        const error = new TokenError(
-          'No access token received in refresh response',
-          TokenErrorCode.REFRESH_FAILED
-        );
-        throw error;
-      }
+      // Update token state
+      this.token = data.refreshToken;
+      this.setState(TokenState.VALID);
+      this.lastRefreshTime = Date.now();
+      this.consecutiveFailures = 0;
+      
+      // Broadcast new token state to other tabs
+      this.broadcastTokenState();
+      
+      // Emit success event
+      this.emit(TokenEventType.REFRESH_SUCCEEDED, this.token);
+      
+      debugLog('Token refresh successful');
     } catch (error) {
-      debugLog('Token refresh error:', error);
-      
-      // Handle error based on type
-      if (error instanceof TokenError) {
-        this.handleError(error);
-      } else if (error instanceof Error) {
-        // Check for network errors
-        if (error.message.includes('fetch') || error.message.includes('network')) {
-          this.handleError(new TokenError(
-            'Network error during token refresh',
-            TokenErrorCode.NETWORK_ERROR,
-            { originalError: error.message }
-          ));
-        } else {
-          this.handleError(new TokenError(
-            error.message,
-            TokenErrorCode.UNKNOWN_ERROR,
-            { originalError: error.message }
-          ));
-        }
-      } else {
-        this.handleError(new TokenError(
-          'Unknown error during token refresh',
-          TokenErrorCode.UNKNOWN_ERROR
-        ));
-      }
+      this.setState(TokenState.ERROR);
+      this.error = error instanceof Error ? error.message : 'Unknown error';
+      this.emit(TokenEventType.REFRESH_FAILED, error);
+      throw error;
     } finally {
       this.isRefreshing = false;
-      this.releaseLock();
-      this.processQueue();
     }
   }
 

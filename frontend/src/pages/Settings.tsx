@@ -57,7 +57,7 @@ function NavItem({ icon, label, active, onClick }: NavItemProps) {
 
 export function Settings() {
   const [activeSection, setActiveSection] = useState('personal');
-  const { user, updateUserProfile } = useAuth();
+  const { user, updateUserProfile, logout } = useAuth();
   const { showNotification } = useNotification();
   const [isLoading, setIsLoading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -180,6 +180,13 @@ export function Settings() {
         console.log('Profile picture upload response:', response.data);
         profilePictureUrl = response.data.data.profilePicture;
         console.log('Updated profilePictureUrl:', profilePictureUrl);
+        
+        // Immediately update user state with new profile picture
+        if (user) {
+          const updatedUser = { ...user, profilePicture: profilePictureUrl };
+          await updateUserProfile(updatedUser);
+        }
+        
         // Clear the pending profile picture and preview URL
         setPendingProfilePicture(null);
         if (previewUrl) {
@@ -210,6 +217,15 @@ export function Settings() {
       
       setSaveSuccess(true);
       showNotification('Profile updated successfully', 'success');
+
+      // Only handle logout if email was changed
+      if (formData.email !== user?.email && response.data.requiresLogout) {
+        showNotification(response.data.message || 'Please verify your new email address. You will be logged out.', 'info');
+        // Wait a moment to show the notification before logging out
+        setTimeout(() => {
+          logout();
+        }, 2000);
+      }
     } catch (error) {
       console.error('Profile update error:', error);
       const message = error instanceof AxiosError 

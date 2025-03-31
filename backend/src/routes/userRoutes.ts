@@ -81,6 +81,7 @@ router.post('/2fa/disable', userController.disableTwoFactor);
 // Profile management
 router.get('/profile', userController.getProfile);
 router.put('/profile', userController.updateProfile);
+router.post('/profile/picture', upload.single('avatar'), userController.updateProfilePicture);
 router.post('/password', userController.changePassword);
 
 // Account management

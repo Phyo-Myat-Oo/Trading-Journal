@@ -13,8 +13,9 @@ import { AdminActivityLog } from '../models/AdminActivityLog';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
-import multer from 'multer';
+import jwt from 'jsonwebtoken';
 import cloudinary from '../config/cloudinary';
+import { emailService } from '../utils/emailService';
 
 // Validation schemas
 const updateUserSchema = z.object({
@@ -30,22 +31,16 @@ const updateUserSchema = z.object({
       'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
     )
     .optional(),
-});
-
-// Configure multer for profile picture uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 2 * 1024 * 1024, // 2MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only JPEG and PNG are allowed.'));
-    }
-  }
+  phone: z.string().optional(),
+  timezone: z.string().optional(),
+  currency: z.string().optional(),
+  language: z.string().optional(),
+  notifications: z.object({
+    email: z.boolean(),
+    push: z.boolean(),
+    sms: z.boolean()
+  }).optional(),
+  profilePicture: z.string().optional()
 });
 
 export class UserController extends BaseController<IUser> {
@@ -87,15 +82,64 @@ export class UserController extends BaseController<IUser> {
         throw new AppError('User not found', HttpStatus.NOT_FOUND);
       }
 
+      // Prevent email changes for Google OAuth users
+      if (validatedData.email && user.provider === 'google') {
+        throw new AppError('Google OAuth users cannot change their email address', HttpStatus.BAD_REQUEST);
+      }
+
       // Check if email is being updated and if it's already in use
       if (validatedData.email && validatedData.email !== user.email) {
         const existingUser = await this.userService.findByEmail(validatedData.email);
         if (existingUser) {
           throw new AppError('Email is already in use', HttpStatus.BAD_REQUEST);
         }
+
+        // Generate verification token
+        const verificationToken = jwt.sign(
+          { id: user._id, newEmail: validatedData.email },
+          process.env.JWT_SECRET || 'default_secret',
+          { expiresIn: '24h' }
+        );
+
+        // Store pending email and verification token
+        user.pendingEmail = validatedData.email;
+        user.verificationToken = verificationToken;
+
+        // Send verification email
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        await emailService.sendVerificationEmail({
+          email: validatedData.email, // Send to new email
+          firstName: user.firstName,
+          token: verificationToken,
+          frontendUrl,
+          isEmailChange: true
+        });
+
+        // Remove email from validatedData so it's not updated until verified
+        delete validatedData.email;
+
+        // Clear user's session since they need to verify email
+        if (req.session) {
+          req.session.destroy(() => {
+            console.log('Session destroyed after initiating email change');
+          });
+        }
+
+        // Set headers to clear client-side tokens
+        res.setHeader('Clear-Site-Data', '"cookies", "storage"');
       }
 
-      // Verify current password only if trying to update password
+      // Update other fields if provided
+      if (validatedData.firstName) user.firstName = validatedData.firstName;
+      if (validatedData.lastName) user.lastName = validatedData.lastName;
+      if (validatedData.phone) user.phone = validatedData.phone;
+      if (validatedData.timezone) user.timezone = validatedData.timezone;
+      if (validatedData.currency) user.currency = validatedData.currency;
+      if (validatedData.language) user.language = validatedData.language;
+      if (validatedData.notifications) user.notifications = validatedData.notifications;
+      if (validatedData.profilePicture) user.profilePicture = validatedData.profilePicture;
+
+      // Handle password update
       if (validatedData.newPassword) {
         if (!validatedData.currentPassword) {
           throw new AppError('Current password is required to update password', HttpStatus.BAD_REQUEST);
@@ -106,7 +150,6 @@ export class UserController extends BaseController<IUser> {
           throw new AppError('Current password is incorrect', HttpStatus.UNAUTHORIZED);
         }
         
-        // Check if the new password is in the password history
         const isPasswordInHistory = await user.isPasswordInHistory(validatedData.newPassword);
         if (isPasswordInHistory) {
           throw new AppError(
@@ -114,21 +157,108 @@ export class UserController extends BaseController<IUser> {
             HttpStatus.BAD_REQUEST
           );
         }
-      }
 
-      // Update fields if provided
-      if (validatedData.firstName) user.firstName = validatedData.firstName;
-      if (validatedData.lastName) user.lastName = validatedData.lastName;
-      if (validatedData.email) user.email = validatedData.email;
-      if (validatedData.newPassword) await this.userService.updatePassword(user, validatedData.newPassword);
+        await this.userService.updatePassword(user, validatedData.newPassword);
+      }
 
       await user.save();
 
       res.status(HttpStatus.OK).json({
         success: true,
-        data: user
+        data: user,
+        message: validatedData.email ? 'A verification email has been sent to your new email address. Please verify to complete the email change. You will be logged out.' : undefined,
+        requiresLogout: !!validatedData.email
       });
     } catch (error) {
+      next(error);
+    }
+  };
+
+  verifyEmailChange = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      console.log('Starting email verification process');
+      const { token } = req.body;
+
+      if (!token) {
+        throw new AppError('Verification token is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Verify and decode the token
+      let decoded;
+      try {
+        console.log('Verifying JWT token');
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret') as { id: string; newEmail: string };
+        console.log('Decoded token:', { userId: decoded.id, newEmail: decoded.newEmail });
+      } catch (error) {
+        console.error('Token verification failed:', error);
+        throw new AppError('Invalid or expired verification token', HttpStatus.BAD_REQUEST);
+      }
+
+      // Find user by ID from token
+      console.log('Finding user with ID:', decoded.id);
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        throw new AppError('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      console.log('Current user state:', {
+        currentEmail: user.email,
+        pendingEmail: user.pendingEmail,
+        hasVerificationToken: !!user.verificationToken
+      });
+
+      // Verify pending email matches the email in token
+      if (!user.pendingEmail || user.pendingEmail !== decoded.newEmail) {
+        console.error('Email mismatch:', {
+          pendingEmail: user.pendingEmail,
+          tokenEmail: decoded.newEmail
+        });
+        throw new AppError('Invalid email verification request', HttpStatus.BAD_REQUEST);
+      }
+
+      console.log('Updating email from', user.email, 'to', user.pendingEmail);
+
+      // Update email and clear verification fields
+      const oldEmail = user.email;
+      user.email = user.pendingEmail;
+      user.pendingEmail = undefined;
+      user.verificationToken = undefined;
+
+      // Save user document
+      try {
+        await user.save();
+        console.log('User document after save:', user.toObject());
+      } catch (saveError) {
+        console.error('Error saving user:', saveError);
+        throw saveError;
+      }
+
+      // Log the email change event
+      await TokenEvent.create({
+        userId: user._id,
+        eventType: 'EMAIL_CHANGE',
+        details: `Email changed from ${oldEmail} to ${user.email}`,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+
+      // Clear user's session and client-side data
+      if (req.session) {
+        req.session.destroy(() => {
+          console.log('User session destroyed');
+        });
+      }
+
+      // Set headers to clear client-side tokens
+      res.setHeader('Clear-Site-Data', '"cookies", "storage"');
+
+      res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Email changed successfully. Please log in with your new email address.',
+        requiresLogin: true
+      });
+    } catch (error) {
+      console.error('Email verification failed:', error);
       next(error);
     }
   };

@@ -8,6 +8,7 @@ import { jwtDecode } from 'jwt-decode';
 import type { JwtPayload } from 'jwt-decode';
 import SessionExpirationDialog from '../components/auth/SessionExpirationDialog';
 import { useToast } from '../providers/ToastProvider';
+import { useNavigate } from 'react-router-dom';
 
 // Add a simple debug logging function to control verbosity
 const debugLog = (...args: unknown[]) => {
@@ -69,16 +70,20 @@ interface AuthProviderProps {
 }
 
 // Use the Auth Context hook
-export const useAuthContext = () => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuthContext must be used within an AuthProvider');
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
 
-// Export the hook with a shorter name for convenience
-export const useAuth = useAuthContext;
+// Add navigation sync constants
+const NAVIGATION_SYNC_KEY = 'auth_navigation_sync';
+const NAVIGATION_RETRY_KEY = 'auth_navigation_retry';
+const MAX_NAVIGATION_RETRIES = 10; // Increased from 3 to 10
+const NAVIGATION_RETRY_INTERVAL = 500; // Reduced from 1000 to 500ms
+const NAVIGATION_STATE_KEY = 'auth_navigation_state'; // New key for persistent state
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
@@ -112,14 +117,167 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const tokenManagerRef = useRef<TokenManager>(TokenManager.getInstance());
   const toast = useToast();
 
-  // Handle token refresh
+  // Add debounce for token refresh
+  const REFRESH_DEBOUNCE = 1000; // 1 second debounce
+
+  // Add navigate hook
+  const navigate = useNavigate();
+
+  // Add navigation sync effect with retry mechanism
+  useEffect(() => {
+    const handleNavigationSync = (event: StorageEvent) => {
+      if (event.key === NAVIGATION_SYNC_KEY && event.newValue) {
+        try {
+          const syncData = JSON.parse(event.newValue) as {
+            tabId: string;
+            action: 'login' | 'logout';
+            timestamp: number;
+            retryCount?: number;
+          };
+          
+          // Ignore events from this tab
+          if (syncData.tabId === tokenManagerRef.current.getTabId()) {
+            return;
+          }
+          
+          // Handle navigation based on action
+          if (syncData.action === 'login') {
+            navigate('/', { replace: true });
+            // Update persistent state
+            localStorage.setItem(NAVIGATION_STATE_KEY, JSON.stringify({
+              action: 'login',
+              timestamp: Date.now()
+            }));
+          } else if (syncData.action === 'logout') {
+            navigate('/login', { replace: true });
+            // Update persistent state
+            localStorage.setItem(NAVIGATION_STATE_KEY, JSON.stringify({
+              action: 'logout',
+              timestamp: Date.now()
+            }));
+          }
+        } catch (error) {
+          console.error('Error processing navigation sync:', error);
+        }
+      } else if (event.key === NAVIGATION_RETRY_KEY && event.newValue) {
+        try {
+          const retryData = JSON.parse(event.newValue) as {
+            tabId: string;
+            action: 'login' | 'logout';
+            retryCount: number;
+            timestamp: number;
+          };
+          
+          // Ignore events from this tab
+          if (retryData.tabId === tokenManagerRef.current.getTabId()) {
+            return;
+          }
+          
+          // Only process if retry count is within limits
+          if (retryData.retryCount <= MAX_NAVIGATION_RETRIES) {
+            // Handle navigation based on action
+            if (retryData.action === 'login') {
+              navigate('/', { replace: true });
+            } else if (retryData.action === 'logout') {
+              navigate('/login', { replace: true });
+            }
+          }
+        } catch (error) {
+          console.error('Error processing navigation retry:', error);
+        }
+      }
+    };
+
+    // Check for existing navigation state on mount
+    const checkExistingState = () => {
+      try {
+        const stateStr = localStorage.getItem(NAVIGATION_STATE_KEY);
+        if (stateStr) {
+          const state = JSON.parse(stateStr);
+          // Only apply if state is less than 5 seconds old
+          if (Date.now() - state.timestamp < 5000) {
+            if (state.action === 'login') {
+              navigate('/', { replace: true });
+            } else if (state.action === 'logout') {
+              navigate('/login', { replace: true });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking existing navigation state:', error);
+      }
+    };
+
+    window.addEventListener('storage', handleNavigationSync);
+    checkExistingState();
+    
+    return () => window.removeEventListener('storage', handleNavigationSync);
+  }, [navigate]);
+
+  // Enhanced navigation broadcast function with retry mechanism
+  const broadcastNavigation = (action: 'login' | 'logout') => {
+    const syncData = {
+      tabId: tokenManagerRef.current.getTabId(),
+      action,
+      timestamp: Date.now(),
+      retryCount: 0
+    };
+    
+    try {
+      // Update persistent state first
+      localStorage.setItem(NAVIGATION_STATE_KEY, JSON.stringify({
+        action,
+        timestamp: Date.now()
+      }));
+      
+      // Broadcast initial navigation
+      localStorage.setItem(NAVIGATION_SYNC_KEY, JSON.stringify(syncData));
+      
+      // Set up retry mechanism
+      let retryCount = 0;
+      const retryInterval = setInterval(() => {
+        retryCount++;
+        if (retryCount <= MAX_NAVIGATION_RETRIES) {
+          const retryData = {
+            ...syncData,
+            retryCount,
+            timestamp: Date.now()
+          };
+          localStorage.setItem(NAVIGATION_RETRY_KEY, JSON.stringify(retryData));
+        } else {
+          clearInterval(retryInterval);
+        }
+      }, NAVIGATION_RETRY_INTERVAL);
+      
+      // Clear retry interval after max retries
+      setTimeout(() => {
+        clearInterval(retryInterval);
+      }, MAX_NAVIGATION_RETRIES * NAVIGATION_RETRY_INTERVAL);
+      
+    } catch (error) {
+      console.error('Error broadcasting navigation:', error);
+    }
+  };
+
+  // Handle token refresh with debouncing
   const refreshToken = useCallback(async (): Promise<boolean> => {
+    const now = Date.now();
+    if (now - lastRefreshAttempt.current < REFRESH_DEBOUNCE) {
+      console.log('Token refresh debounced, too soon since last attempt');
+      return false;
+    }
+    
+    lastRefreshAttempt.current = now;
     try {
       setTokenRefreshAttempts(prev => prev + 1);
       const newToken = await tokenManagerRef.current.refresh();
-      return !!newToken; // Convert to boolean for compatibility
+      return !!newToken;
     } catch (error) {
       console.error('Token refresh failed:', error);
+      // If we get a 401, we should logout
+      if (error instanceof Error && error.message.includes('401')) {
+        await logout(true);
+      }
       return false;
     }
   }, []);
@@ -290,16 +448,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     
     // Handle token error event
     const handleTokenError = (error: unknown) => {
-      console.error('TokenManager reported error:', error);
-      // Increment refresh attempts on error
-      setTokenRefreshAttempts(prev => prev + 1);
-      
-      // If we've had too many errors, log out
-      if (tokenRefreshAttempts >= 3 && isOnline) {
-        debugLog('Too many token errors, logging out');
-        logout(true).catch(err => {
-          console.error('Error during forced logout:', err);
-        });
+      console.error('Token error:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('401') || error.message.includes('unauthorized')) {
+          logout(true).catch(console.error);
+        }
       }
     };
     
@@ -448,15 +601,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         console.log('AuthContext: Setting user in state', response.user);
         setUser(response.user);
         setAuthState('authenticated');
-      
-        // Start token refresh timer, but now using TokenManager
+        
+        // Start token refresh timer
         startTokenRefreshTimer();
         
-        // Initialize TokenManager with the new token
-        const token = authService.getToken();
-        if (token) {
-          tokenManagerRef.current.initializeToken(token);
-        }
+        // Broadcast login navigation
+        broadcastNavigation('login');
         
         return response;
       } else {
@@ -550,6 +700,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (!silent) {
         await authService.logout();
       }
+
+      // Broadcast logout navigation
+      broadcastNavigation('logout');
     } catch (err) {
       // Even if the API call fails, we still want to clear local state
       console.error('Error during logout API call:', err);
@@ -699,11 +852,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setUser(prevUser => {
         if (!prevUser) return null;
         const updatedUser = { ...prevUser, ...userData };
+        
         // Update localStorage with the new user data
         localStorage.setItem('user', JSON.stringify(updatedUser));
-        // Dispatch a custom event to notify components about the profile update
-        const event = new CustomEvent('userProfileUpdated', { detail: updatedUser });
+        
+        // Use localStorage event for cross-tab communication
+        const event = new StorageEvent('storage', {
+          key: 'user',
+          newValue: JSON.stringify(updatedUser),
+          oldValue: JSON.stringify(prevUser)
+        });
         window.dispatchEvent(event);
+        
+        // Also dispatch the custom event for backward compatibility
+        const customEvent = new CustomEvent('userProfileUpdated', { detail: updatedUser });
+        window.dispatchEvent(customEvent);
+        
         return updatedUser;
       });
     } catch (error) {

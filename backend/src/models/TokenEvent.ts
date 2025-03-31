@@ -10,7 +10,8 @@ export type TokenEventType =
   | 'LOGOUT'
   | 'TOKEN_REFRESH'
   | 'TOKEN_REVOKED'
-  | 'ABSOLUTE_TIMEOUT';
+  | 'ABSOLUTE_TIMEOUT'
+  | 'EMAIL_CHANGE';
 
 export interface ITokenEvent extends Document {
   userId: Types.ObjectId;
@@ -53,7 +54,8 @@ const tokenEventSchema = new Schema<ITokenEvent>(
         'LOGOUT',
         'TOKEN_REFRESH',
         'TOKEN_REVOKED',
-        'ABSOLUTE_TIMEOUT'
+        'ABSOLUTE_TIMEOUT',
+        'EMAIL_CHANGE'
       ]
     },
     details: {

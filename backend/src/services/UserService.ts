@@ -2,7 +2,6 @@ import { BaseService } from './BaseService';
 import { User, IUser } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { HttpStatus } from '../utils/errorResponse';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
 import crypto from 'crypto';
@@ -90,5 +89,26 @@ export class UserService extends BaseService<IUser> {
     user.role = newRole;
     await user.save();
     return user;
+  }
+
+  async sendEmailVerification(email: string, token: string): Promise<void> {
+    // TODO: Implement email sending logic using your email service
+    // For development, just log the verification link
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Email verification link: ${config.frontendUrl}/verify-email?token=${token}`);
+      return;
+    }
+
+    // Example email sending logic (replace with your email service implementation)
+    // await sendEmail({
+    //   to: email,
+    //   subject: 'Verify Your New Email Address',
+    //   text: `Please click the following link to verify your new email address: ${config.frontendUrl}/verify-email?token=${token}`,
+    //   html: `
+    //     <p>Please click the following link to verify your new email address:</p>
+    //     <a href="${config.frontendUrl}/verify-email?token=${token}">Verify Email</a>
+    //     <p>This link will expire in 24 hours.</p>
+    //   `
+    // });
   }
 } 
