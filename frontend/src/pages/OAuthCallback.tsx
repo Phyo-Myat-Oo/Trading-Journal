@@ -2,11 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import authService from '../services/authService';
+import { jwtDecode } from 'jwt-decode';
+import { TokenManager } from '../services/TokenManager';
+
+interface JwtPayload {
+  id: string;
+  exp: number;
+  iat: number;
+  email?: string;
+  role?: string;
+  firstName?: string;
+  lastName?: string;
+}
 
 const OAuthCallback = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setUser, setAuthState } = useAuth() as any;
+  const { setUser, setAuthState } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -27,22 +39,47 @@ const OAuthCallback = () => {
         const firstName = params.get('firstName') || '';
         const lastName = params.get('lastName') || '';
         const email = params.get('email') || '';
+        const profilePicture = params.get('profilePicture') || null;
         
         // Store token
         authService.setToken(token);
         
+        // Initialize TokenManager with the token for proper refresh handling
+        const tokenManager = TokenManager.getInstance();
+        tokenManager.initializeToken(token);
+        
+        // Extract user ID from token
+        let userId = '';
+        try {
+          const decoded = jwtDecode<JwtPayload>(token);
+          userId = decoded.id;
+          console.log('Extracted user ID from token:', userId);
+        } catch (decodeError) {
+          console.error('Failed to decode token:', decodeError);
+        }
+        
         // Set user in auth context
         const user = {
-          id: '', // We don't have the ID from the URL, but it's in the token
+          id: userId,
           firstName,
           lastName,
           email,
-          role: 'user',
-          isVerified: true
+          role: 'user' as 'user' | 'admin',
+          isVerified: true,
+          profilePicture
         };
         
+        console.log('Setting user in auth context:', user);
         setUser(user);
         setAuthState('authenticated');
+        
+        // Also save user to localStorage for persistence across page reloads
+        localStorage.setItem('user', JSON.stringify(user));
+        console.log('User info saved to localStorage:', user);
+        
+        // Verify the user was stored correctly
+        const storedUser = localStorage.getItem('user');
+        console.log('User from localStorage:', storedUser);
         
         // Redirect to home page
         navigate('/');

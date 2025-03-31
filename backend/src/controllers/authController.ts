@@ -237,16 +237,18 @@ export const login = async (req: Request, res: Response) => {
 
     // Return success response
     res.status(200).json({
-      message: 'Login successful',
-      accessToken,
-      user: {
-        id: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        isVerified: user.isVerified,
-        twoFactorEnabled: user.twoFactorEnabled
+      success: true,
+      data: {
+        accessToken,
+        user: {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+          profilePicture: user.profilePicture || null,
+          isVerified: user.isVerified
+        }
       }
     });
   } catch (error) {
@@ -864,7 +866,8 @@ export const handleGoogleAuthCallback = async (req: Request, res: Response) => {
       `token=${encodeURIComponent(result.accessToken)}` +
       `&firstName=${encodeURIComponent(user.firstName)}` + 
       `&lastName=${encodeURIComponent(user.lastName)}` +
-      `&email=${encodeURIComponent(user.email)}`
+      `&email=${encodeURIComponent(user.email)}` +
+      `&profilePicture=${encodeURIComponent(user.profilePicture || '')}`
     );
   } catch (error) {
     console.error('Google auth callback error:', error);

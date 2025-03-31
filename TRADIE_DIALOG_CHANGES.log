@@ -1,0 +1,71 @@
+# Tradie Dialog Changes Log
+
+## Date: 2024-04-02
+## Focus: New Tradie Dialog Enhancements
+
+### Requirements:
+1. Add "INDEX" to Market options choice
+2. Change General Trade and Journal relationship to Many-to-one (multiple journal entries for one trade)
+
+### Current Implementation:
+- Market options: Currently defined as 'STOCK' | 'OPTION' | 'CRYPTO' | 'FOREX' in frontend/src/types/trading.ts
+- TradeDialog component uses these options in a dropdown in frontend/src/components/dialogs/TradeDialog.tsx
+- JournalEntry model has a `tradeId` field (optional) linking to a Trade in backend/src/models/JournalEntry.ts
+- This currently represents a one-to-one relationship where a journal entry may or may not be associated with a trade
+
+### Research Findings:
+1. TradeDialog Component:
+   - Has two tabs: 'general' and 'journal'
+   - Supports multiple entries (buy/sell) per trade
+   - Has form validation for required fields
+   - Includes screenshot upload functionality
+   - Has tag management system
+
+2. JournalEntry Model:
+   - Has optional tradeId field
+   - Includes title, content, mood, tags, and date fields
+   - Has proper indexing for performance
+   - Includes validation for tags
+
+3. Current Data Flow:
+   - Trade creation starts with basic info (market, symbol, etc.)
+   - Multiple entries can be added (buy/sell actions)
+   - Journal entry can be created and linked to trade
+   - All data is saved together when form is submitted
+
+### New Ideas:
+1. Data Structure:
+   - Keep Trade-Journal as one-to-one relationship
+   - Keep Trade-Entries as one-to-many relationship
+   - This matches the UI flow where each trade has one journal entry
+   - Multiple entries represent the trade's lifecycle
+
+2. UI Improvements:
+   - Add visual indicator for trade status (open/closed)
+   - Show entry history in chronological order
+   - Add ability to reorder entries
+   - Add entry grouping by date
+
+3. Save Function Enhancement:
+   - Add validation for entry sequence (buy before sell)
+   - Add position calculation based on entries
+   - Add P&L calculation based on entries
+   - Add data consistency checks
+
+### Progress:
+[ ] 1. Add "INDEX" market option:
+    [ ] Update frontend/src/types/trading.ts interfaces
+    [ ] Update TradeDialog component dropdown
+    [ ] Update any relevant backend models
+
+[ ] 2. Enhance Save Function:
+    [ ] Add entry sequence validation
+    [ ] Add position calculation
+    [ ] Add P&L calculation
+    [ ] Add data consistency checks
+
+### Implementation Notes:
+- Will track all changes and decisions here
+- Will document any issues encountered
+- Focus on maintaining data integrity during save operations
+- Ensure proper validation at each step 

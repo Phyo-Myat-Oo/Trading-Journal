@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { jwtDecode, JwtPayload as JwtPayloadType } from 'jwt-decode';
 import api from '../utils/api';
 import {
@@ -6,7 +5,6 @@ import {
   encryptData,
   decryptData,
   getTokenRemainingTime,
-  isTokenFingerprintValid,
   checkOnlineStatus,
   User
 } from '../utils/auth';
@@ -34,6 +32,7 @@ export interface AuthResponse {
     firstName: string;
     lastName: string;
     role: 'user' | 'admin';
+    profilePicture: string | null;
   };
   message: string;
   success?: boolean;
@@ -99,9 +98,10 @@ let accessToken: string | null = null;
 let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
 
-// Initialization status
-let isInitializing = false;
-let isInitialized = false;
+// Track if a logout is in progress
+let isLoggingOut = false;
+// Timeout to reset the logout state
+let logoutResetTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Debounce API calls - commented out as it's handled by TokenManager now
 /*
@@ -187,11 +187,6 @@ const getStoredFingerprint = () => {
   }
 };
 
-// Track if a logout is in progress
-let isLoggingOut = false;
-// Timeout to reset the logout state
-let logoutResetTimeout: ReturnType<typeof setTimeout> | null = null;
-
 const register = async (userData: RegisterData): Promise<AuthResponse> => {
   console.log('Attempting registration with:', userData.email);
   try {
@@ -222,87 +217,40 @@ const register = async (userData: RegisterData): Promise<AuthResponse> => {
 
 const login = async (userData: LoginData): Promise<AuthResponse> => {
   console.log('Attempting login with:', userData.email);
-  console.log('Remember Me enabled:', userData.rememberMe ?? false);
-  
   try {
-    console.log('Making POST request to /api/auth/login');
-    const response = await api.post('/api/auth/login', {
-      email: userData.email,
-      password: userData.password,
-      rememberMe: userData.rememberMe
-    }, { 
-      withCredentials: true,
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      timeout: 10000 // 10 second timeout
-    });
-    
-    console.log('Login response received:', response.status);
-    console.log('Response data structure:', Object.keys(response.data));
-    console.log('Full response data:', JSON.stringify(response.data, null, 2));
-    
-    // Check if 2FA is required
-    if (response.data.requireTwoFactor) {
-      console.log('Two-factor authentication required');
-      return {
-        message: 'Two-factor authentication required',
-        requireTwoFactor: true,
-        userId: response.data.userId,
-        success: false
+    const response = await api.post('/api/auth/login', userData);
+    console.log('Login response:', response.data);
+
+    // Store token if provided
+    if (response.data.data?.accessToken) {
+      accessToken = response.data.data.accessToken;
+      storeTokenFingerprint(response.data.data.accessToken);
+    }
+
+    // Store user data if provided
+    if (response.data.data?.user) {
+      // Ensure we have all required fields and profile picture is explicitly set to null if not provided
+      const userData = {
+        id: response.data.data.user.id,
+        email: response.data.data.user.email,
+        firstName: response.data.data.user.firstName,
+        lastName: response.data.data.user.lastName,
+        role: response.data.data.user.role,
+        isVerified: response.data.data.user.isVerified,
+        profilePicture: response.data.data.user.profilePicture || null
       };
+      console.log('Storing user data:', userData);
+      localStorage.setItem('user', JSON.stringify(userData));
     }
-    
-    if (response.data && response.data.accessToken) {
-      accessToken = response.data.accessToken;
-      
-      // Make sure the user object is complete
-      if (response.data.user && 
-          response.data.user.id && 
-          response.data.user.email && 
-          response.data.user.firstName) {
-        
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        console.log('User info stored in localStorage', response.data.user);
-        
-        // Store token fingerprint for persistence
-        storeTokenFingerprint(response.data.accessToken);
-      } else {
-        console.error('Invalid user object in response:', response.data.user);
-        throw new Error('Invalid user data received from server');
-      }
-      
-      console.log('Access token saved, length:', response.data.accessToken.length);
-    } else {
-      console.warn('No accessToken received from login response. Response:', JSON.stringify(response.data));
-      throw new Error('No authentication token received');
-    }
-    
-    return { ...response.data, success: true };
+
+    return {
+      success: response.data.success,
+      accessToken: response.data.data?.accessToken,
+      user: response.data.data?.user,
+      message: response.data.message
+    };
   } catch (error) {
-    console.error('Login error details:', error);
-    
-    // Add specific handling for different error types
-    if (axios.isAxiosError(error)) {
-      if (error.code === 'ECONNABORTED') {
-        console.error('Request timeout');
-        throw new Error('Login request timed out. Please try again.');
-      }
-      
-      if (!error.response) {
-        console.error('Network error');
-        throw new Error('Network error. Please check your connection and try again.');
-      }
-      
-      // Log the server error response
-      if (error.response) {
-        console.error('Server response error:', {
-          status: error.response.status,
-          data: error.response.data
-        });
-      }
-    }
-    
+    console.error('Login error:', error);
     throw error;
   }
 };
@@ -449,57 +397,36 @@ const refreshToken = async (): Promise<boolean> => {
  * This now properly initializes TokenManager
  */
 const initializeAuth = async (): Promise<boolean> => {
-  if (isInitializing || isInitialized) {
-    debugLog(`Auth initialization already ${isInitializing ? 'in progress' : 'completed'}`);
-    return isAuthenticated();
-  }
-  
-  isInitializing = true;
-  debugLog('Starting auth initialization');
-  
   try {
-    // Get TokenManager instance
-    const tokenManager = TokenManager.getInstance();
+    // Check if we have a stored user
+    const storedUser = localStorage.getItem('user');
+    console.log('Stored user data:', storedUser);
     
-    // Check for existing token
-    const existingToken = getToken();
-    
-    // If we have a token, validate it with TokenManager
-    if (existingToken) {
-      tokenManager.initializeToken(existingToken);
+    if (storedUser) {
+      const userData = JSON.parse(storedUser);
+      console.log('Parsed user data:', userData);
       
-      // Check if token is valid according to TokenManager
-      if (tokenManager.isTokenValid()) {
-        debugLog('Found valid token, authentication successful');
-        isInitialized = true;
+      // Validate user data
+      if (userData && userData.id && userData.email) {
+        // Ensure profile picture is included
+        if (userData.profilePicture) {
+          console.log('Profile picture URL:', userData.profilePicture);
+        }
+        
+        // Store user data in localStorage
+        localStorage.setItem('user', JSON.stringify({
+          ...userData,
+          profilePicture: userData.profilePicture || null
+        }));
+        
         return true;
-      } else {
-        debugLog('Found expired token, attempting refresh');
-        const refreshSuccessful = await refreshToken();
-        isInitialized = true;
-        return refreshSuccessful;
       }
     }
     
-    // No token in memory, check for token fingerprint
-    const fingerprint = getStoredFingerprint();
-    if (fingerprint && isTokenFingerprintValid(fingerprint)) {
-      debugLog('Found valid token fingerprint, attempting refresh');
-      const refreshSuccessful = await refreshToken();
-      isInitialized = true;
-      return refreshSuccessful;
-    }
-    
-    // No valid token or fingerprint
-    debugLog('No valid authentication found');
-    isInitialized = true;
     return false;
   } catch (error) {
-    console.error('Error during auth initialization:', error);
-    isInitialized = true;
+    console.error('Error initializing auth:', error);
     return false;
-  } finally {
-    isInitializing = false;
   }
 };
 

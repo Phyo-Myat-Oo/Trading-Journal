@@ -2,8 +2,25 @@ import express from 'express';
 import { userController } from '../controllers/userController';
 import { authenticate, authorize } from '../middleware/authMiddleware';
 import { csrfProtection } from '../middleware/csrfMiddleware';
+import multer from 'multer';
 
 const router = express.Router();
+
+// Configure multer for profile picture uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG and PNG are allowed.'));
+    }
+  }
+});
 
 // Public routes
 router.post('/register', userController.register);
@@ -22,6 +39,9 @@ router.use(authenticate);
  * @note CSRF protection intentionally disabled for this route to fix CORS issues
  */
 router.post('/2fa/verify', userController.verifyAndEnableTwoFactor);
+
+// Profile picture upload route - bypass CSRF for file upload
+router.post('/profile/picture', upload.single('avatar'), userController.updateProfilePicture);
 
 // Add CSRF protection for all other protected routes
 router.use(csrfProtection);

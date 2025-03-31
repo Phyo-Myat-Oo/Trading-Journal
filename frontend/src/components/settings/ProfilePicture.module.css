@@ -1,0 +1,30 @@
+.wrapper {
+  position: relative;
+  width: fit-content;
+  margin-bottom: rem(32);
+}
+
+.avatar {
+  border: 2px solid var(--mantine-color-dark-6);
+  background-color: var(--mantine-color-dark-7);
+  color: var(--mantine-color-gray-3);
+  font-size: rem(32);
+  font-weight: 500;
+}
+
+.editButton {
+  position: absolute;
+  bottom: rem(8);
+  right: rem(8);
+  border: 2px solid var(--mantine-color-dark-7);
+  background-color: var(--mantine-color-blue-6);
+  color: white;
+  width: rem(32);
+  height: rem(32);
+  transition: all 0.2s ease;
+}
+
+.editButton:hover {
+  background-color: var(--mantine-color-blue-7);
+  transform: scale(1.05);
+} 

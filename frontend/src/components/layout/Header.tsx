@@ -1,7 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { RiNotification3Line, RiUserLine, RiMenuLine, RiLogoutBoxLine } from 'react-icons/ri';
+import { RiNotification3Line, RiMenuLine, RiLogoutBoxLine } from 'react-icons/ri';
 import { DateFilterContainer } from '../DateRangePicker';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, User } from '../../contexts/AuthContext';
+
+// Create a reusable ProfileAvatar component for the header
+function HeaderProfileAvatar({ 
+  profilePicture, 
+  initial, 
+  onClick 
+}: { 
+  profilePicture: string | null | undefined;
+  initial?: string;
+  onClick: () => void;
+}) {
+  const [imageError, setImageError] = useState(false);
+
+  if (profilePicture && !imageError) {
+    return (
+      <button 
+        onClick={onClick}
+        className="relative w-8 h-8 rounded-full overflow-hidden border border-gray-700 hover:border-gray-500 transition-colors focus:outline-none"
+      >
+        <img 
+          src={profilePicture} 
+          alt="Profile" 
+          className="w-full h-full object-cover"
+          onError={() => setImageError(true)}
+        />
+      </button>
+    );
+  }
+
+  // Use initial when no profile picture is available or image failed to load
+  return (
+    <button 
+      className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 text-sm font-medium border border-gray-700 hover:border-gray-500 transition-colors focus:outline-none"
+      onClick={onClick}
+    >
+      {initial || 'U'}
+    </button>
+  );
+}
 
 interface HeaderProps {
   dateRange?: [Date, Date];
@@ -20,6 +59,23 @@ export const Header: React.FC<HeaderProps> = ({
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const desktopMenuRef = useRef<HTMLDivElement>(null);
+  const [profileKey, setProfileKey] = useState(0); // Add a key to force re-render
+
+  // Get the initial for the avatar
+  const userInitial = user?.firstName ? user.firstName[0] : 'U';
+
+  // Listen for profile updates
+  useEffect(() => {
+    const handleProfileUpdate = (_event: CustomEvent<User>) => {
+      // Force a re-render of the HeaderProfileAvatar by updating its key
+      setProfileKey(prev => prev + 1);
+    };
+
+    window.addEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+    return () => {
+      window.removeEventListener('userProfileUpdated', handleProfileUpdate as EventListener);
+    };
+  }, []);
 
   const handleLogout = async () => {
     // Prevent multiple clicks
@@ -38,10 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
     } catch (error) {
       console.error('Error during logout:', error);
     } finally {
-      // Reset after a delay to prevent rapid clicks
-      setTimeout(() => {
-        setIsLoggingOut(false);
-      }, 2000);
+      setIsLoggingOut(false);
     }
   };
 
@@ -90,25 +143,19 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
         
-        <div className="flex-1 flex justify-center">
-          <DateFilterContainer 
-            dateRange={externalDateRange}
-            onDateRangeChange={onDateRangeChange}
-            compact={true}
-          />
-        </div>
-        
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button className="text-gray-400 hover:text-gray-200 transition-colors p-1.5">
-            <RiNotification3Line size={20} />
+            <RiNotification3Line size={22} />
           </button>
+          
           <div className="relative" ref={mobileMenuRef}>
-            <button 
-              className="text-gray-400 hover:text-gray-200 transition-colors p-1.5"
+            <HeaderProfileAvatar 
+              key={profileKey}
+              profilePicture={user?.profilePicture}
+              initial={userInitial}
               onClick={toggleMobileMenu}
-            >
-              <RiUserLine size={20} />
-            </button>
+            />
+            
             {mobileMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-[#1E2024] rounded-md shadow-lg py-1 z-50">
                 {user && (
@@ -167,12 +214,13 @@ export const Header: React.FC<HeaderProps> = ({
               <RiNotification3Line size={22} />
             </button>
             <div className="relative" ref={desktopMenuRef}>
-              <button 
-                className="text-gray-400 hover:text-gray-200 transition-colors p-1.5"
+              <HeaderProfileAvatar 
+                key={profileKey}
+                profilePicture={user?.profilePicture}
+                initial={userInitial}
                 onClick={toggleDesktopMenu}
-              >
-                <RiUserLine size={22} />
-              </button>
+              />
+              
               {desktopMenuOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-[#1E2024] rounded-md shadow-lg py-1 z-50">
                   {user && (

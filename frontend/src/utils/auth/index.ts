@@ -8,6 +8,7 @@ export interface User {
   firstName: string;
   lastName: string;
   role: 'user' | 'admin';
+  profilePicture: string | null;
 }
 
 // Common types

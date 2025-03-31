@@ -25,7 +25,17 @@ export interface User {
   firstName: string;
   lastName: string;
   role: 'user' | 'admin';
+  profilePicture: string | null;
   isVerified?: boolean;
+  phone?: string;
+  timezone?: string;
+  currency?: string;
+  language?: string;
+  notifications?: {
+    email: boolean;
+    push: boolean;
+    sms: boolean;
+  };
 }
 
 // Define Auth Context value interface
@@ -45,6 +55,10 @@ interface AuthContextType {
   verifyTwoFactor: (userId: string, code: string) => Promise<AuthResponse>;
   verifyWithBackupCode: (userId: string, backupCode: string) => Promise<AuthResponse>;
   cancelTwoFactor: () => void;
+  // Add setters needed for OAuth callback
+  setUser: React.Dispatch<React.SetStateAction<User | null>>;
+  setAuthState: React.Dispatch<React.SetStateAction<AuthStateType>>;
+  updateUserProfile: (userData: Partial<User>) => Promise<void>;
 }
 
 // Create the context with a default value
@@ -223,7 +237,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               email: decoded.email || 'unknown@example.com',
               firstName: decoded.firstName || 'Unknown',
               lastName: decoded.lastName || 'User',
-              role: (decoded.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin'
+              role: (decoded.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin',
+              profilePicture: null
             };
             setUser(minimalUser);
           }
@@ -676,6 +691,54 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
+  const updateUserProfile = async (userData: Partial<User>) => {
+    if (!user) return;
+    
+    try {
+      // Update the local state with the new user data
+      setUser(prevUser => {
+        if (!prevUser) return null;
+        const updatedUser = { ...prevUser, ...userData };
+        // Update localStorage with the new user data
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        // Dispatch a custom event to notify components about the profile update
+        const event = new CustomEvent('userProfileUpdated', { detail: updatedUser });
+        window.dispatchEvent(event);
+        return updatedUser;
+      });
+    } catch (error) {
+      console.error('Failed to update user profile:', error);
+      throw error;
+    }
+  };
+
+  // Initialize user data from localStorage
+  useEffect(() => {
+    const initializeUser = () => {
+      try {
+        const storedUser = localStorage.getItem('user');
+        console.log('Stored user data:', storedUser);
+        if (storedUser) {
+          const userData = JSON.parse(storedUser);
+          console.log('Parsed user data:', userData);
+          // Ensure profile picture is included
+          if (userData.profilePicture) {
+            console.log('Profile picture URL:', userData.profilePicture);
+          }
+          setUser(userData);
+          // Also update form data in Settings if needed
+          if (window.location.pathname === '/settings') {
+            const event = new CustomEvent('userDataInitialized', { detail: userData });
+            window.dispatchEvent(event);
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing user data:', error);
+      }
+    };
+    initializeUser();
+  }, []);
+
   const value = {
     user,
     isAuthenticated: Boolean(user && authState === 'authenticated' && !twoFactorRequired),
@@ -691,7 +754,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     clearError,
     verifyTwoFactor,
     verifyWithBackupCode,
-    cancelTwoFactor
+    cancelTwoFactor,
+    setUser,
+    setAuthState,
+    updateUserProfile
   };
 
   return (

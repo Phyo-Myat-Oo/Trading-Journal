@@ -1,158 +1,390 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Tabs, 
-  Title, 
-  Container, 
-  Paper, 
-  Group, 
+  Box,
   Text, 
-  Divider, 
-  Box, 
-  Breadcrumbs, 
-  Anchor,
+  Stack,
+  TextInput,
+  Button,
   rem,
-  Transition
+  Paper,
+  Transition,
+  Divider
 } from '@mantine/core';
 import { 
-  RiUser3Line, 
-  RiLockLine, 
+  RiGiftLine,
+  RiSettings4Line,
+  RiPriceTag3Line,
   RiShieldLine, 
-  RiSettings3Line,
-  RiHome2Line,
-  RiUserSettingsLine
+  RiAlertLine,
+  RiCheckLine,
 } from 'react-icons/ri';
-import { SessionsManagement } from '../components/settings/SessionsManagement';
-import AccountSecurity from '../components/security/AccountSecurity';
-import { useAuth } from '../contexts/AuthContext';
-import { useLocation, Link } from 'react-router-dom';
-import EmailVerificationStatus from '../components/auth/EmailVerificationStatus';
+import { useAuth, User } from '../contexts/AuthContext';
+import { ProfilePicture } from '../components/settings/ProfilePicture';
+import { notifications } from '@mantine/notifications';
+import { AxiosError } from 'axios';
+import api from '../utils/api';
+import { TokenManager } from '../services/TokenManager';
+import { useNotification } from '../contexts/NotificationContext';
 
-interface LocationState {
-  activeTab?: string;
+interface NavItemProps {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+}
+
+function NavItem({ icon, label, active, onClick }: NavItemProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full p-3 rounded-lg text-left transition-all duration-200 transform ${
+        active 
+          ? 'bg-blue-500/15 text-blue-400 scale-102 shadow-sm' 
+          : 'text-gray-400 hover:bg-blue-500/5 hover:text-gray-200'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <span className={`text-xl flex-shrink-0 transition-transform duration-200 ${active ? 'scale-110' : ''}`}>
+          {icon}
+        </span>
+        <Text size="sm" fw={600} className="tracking-wide truncate">
+          {label}
+        </Text>
+      </div>
+    </button>
+  );
 }
 
 export function Settings() {
-  const [activeTab, setActiveTab] = useState<string | null>('account');
-  const [mounted, setMounted] = useState(false);
-  const { user } = useAuth();
-  const location = useLocation();
+  const [activeSection, setActiveSection] = useState('personal');
+  const { user, updateUserProfile } = useAuth();
+  const { showNotification } = useNotification();
+  const [isLoading, setIsLoading] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [pendingProfilePicture, setPendingProfilePicture] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
-  useEffect(() => {
-    // Check if location state has an activeTab value
-    const state = location.state as LocationState;
-    if (state?.activeTab) {
-      setActiveTab(state.activeTab);
-    }
-    
-    // Set mounted for animations
-    setMounted(true);
-    return () => setMounted(false);
-  }, [location]);
+  const [formData, setFormData] = useState({
+    firstName: user?.firstName || '',
+    lastName: user?.lastName || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    timezone: user?.timezone || 'UTC',
+    currency: user?.currency || 'USD',
+    language: user?.language || 'en',
+    notifications: user?.notifications || {
+      email: true,
+      push: true,
+      sms: false
+    },
+    profilePicture: user?.profilePicture || ''
+  });
 
-  const items = [
-    { title: 'Home', href: '/', icon: <RiHome2Line size={14} /> },
-    { title: 'Settings', href: '#', icon: <RiUserSettingsLine size={14} /> },
-  ].map((item, index) => (
-    <Anchor component={Link} to={item.href} key={index} fw={500} size="sm">
-      <Group gap={6}>
-        {item.icon}
-        {item.title}
-      </Group>
-    </Anchor>
-  ));
+  // Initialize token when component mounts
+  useEffect(() => {
+    const tokenManager = TokenManager.getInstance();
+    const token = localStorage.getItem('token');
+    
+    if (token && !tokenManager.isTokenValid()) {
+      console.log('Token found but invalid, attempting refresh');
+      tokenManager.refreshToken('high').catch(error => {
+        console.error('Failed to refresh token:', error);
+        notifications.show({
+          title: 'Session Error',
+          message: 'Your session has expired. Please log in again.',
+          color: 'red',
+          withBorder: true
+        });
+      });
+    }
+  }, []);
+
+  // Initialize form data when user data changes or is initialized
+  useEffect(() => {
+    const handleUserDataInitialized = (event: CustomEvent<User>) => {
+      const userData = event.detail;
+      setFormData({
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
+        email: userData.email || '',
+        phone: userData.phone || '',
+        timezone: userData.timezone || 'UTC',
+        currency: userData.currency || 'USD',
+        language: userData.language || 'en',
+        notifications: userData.notifications || {
+          email: true,
+          push: true,
+          sms: false
+        },
+        profilePicture: userData.profilePicture || ''
+      });
+    };
+
+    // Listen for user data initialization
+    window.addEventListener('userDataInitialized', handleUserDataInitialized as EventListener);
+
+    // Initialize form data from user object
+    if (user) {
+      setFormData({
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        timezone: user.timezone || 'UTC',
+        currency: user.currency || 'USD',
+        language: user.language || 'en',
+        notifications: user.notifications || {
+          email: true,
+          push: true,
+          sms: false
+        },
+        profilePicture: user.profilePicture || ''
+      });
+    }
+
+    return () => {
+      window.removeEventListener('userDataInitialized', handleUserDataInitialized as EventListener);
+    };
+  }, [user]);
+
+  const navItems = [
+    { id: 'personal', label: 'Personal Info', icon: <RiGiftLine size={22} /> },
+    { id: 'account', label: 'Account Settings', icon: <RiSettings4Line size={22} /> },
+    { id: 'tags', label: 'Tag Management', icon: <RiPriceTag3Line size={22} /> },
+    { id: 'security', label: 'Password & Security', icon: <RiShieldLine size={22} /> },
+    { id: 'danger', label: 'Danger Zone', icon: <RiAlertLine size={22} color="#ff4d4f" /> },
+  ];
+
+  const handleImageChange = (file: File) => {
+    setPendingProfilePicture(file);
+    const preview = URL.createObjectURL(file);
+    setPreviewUrl(preview);
+  };
+
+  const handleSave = async () => {
+    try {
+      setIsLoading(true);
+      setSaveSuccess(false);
+      let profilePictureUrl = user?.profilePicture;
+      console.log('Initial profilePictureUrl:', profilePictureUrl);
+
+      // Upload profile picture if one is pending
+      if (pendingProfilePicture) {
+        const formData = new FormData();
+        formData.append('avatar', pendingProfilePicture);
+        const response = await api.post('/api/users/profile/picture', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        console.log('Profile picture upload response:', response.data);
+        profilePictureUrl = response.data.data.profilePicture;
+        console.log('Updated profilePictureUrl:', profilePictureUrl);
+        // Clear the pending profile picture and preview URL
+        setPendingProfilePicture(null);
+        if (previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(null);
+        }
+      }
+
+      // Update profile with new profile picture URL if uploaded
+      const updateData = {
+        ...formData,
+        profilePicture: profilePictureUrl
+      };
+      console.log('Sending update data:', updateData);
+
+      const response = await api.put('/api/users/profile', updateData);
+      console.log('Profile update response:', response.data);
+      
+      // Update user state with the response data
+      if (response.data.success && response.data.data) {
+        await updateUserProfile(response.data.data);
+        // Also update form data
+        setFormData(prev => ({
+          ...prev,
+          ...response.data.data
+        }));
+      }
+      
+      setSaveSuccess(true);
+      showNotification('Profile updated successfully', 'success');
+    } catch (error) {
+      console.error('Profile update error:', error);
+      const message = error instanceof AxiosError 
+        ? error.response?.data?.message || 'Failed to update profile'
+        : 'Failed to update profile';
+      
+      if (error instanceof AxiosError && error.response?.data?.message === 'Email is already in use') {
+        showNotification('This email is already in use', 'error');
+      } else {
+        showNotification(message, 'error');
+      }
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    }
+  };
 
   return (
-    <Container size="xl" py="xl">
-      <Transition mounted={mounted} transition="fade" duration={400} timingFunction="ease">
-        {(styles) => (
-          <div style={styles}>
-            <Box mb="lg">
-              <Breadcrumbs separator="→" mt="xs" mb="lg">
-                {items}
-              </Breadcrumbs>
-              
-              <Group mb="sm">
-                <Title order={2}>Account Settings</Title>
-              </Group>
-              
-              <Text c="dimmed" size="sm" mb="lg">
-                Manage your account settings, security, and sessions
+    <div className="flex min-h-screen bg-[#13151A]">
+      {/* Left Sidebar */}
+      <Paper 
+        className="w-[280px] bg-[#1A1B1E] p-6 border-r border-[#2C2E33]"
+        shadow="md"
+      >
+        <Text size="lg" fw={700} c="blue" mb={rem(24)} className="tracking-wide">
+          Settings
               </Text>
-            </Box>
-            
-            <Paper shadow="sm" p="md" withBorder>
-              <Tabs
-                value={activeTab}
-                onChange={setActiveTab}
-                radius="md"
-                variant="pills"
-                placement="left"
-                defaultValue="account"
-              >
-                <Tabs.List style={{ minWidth: rem(200) }}>
-                  <Box mb="md" p="md">
-                    <Group gap="xs">
-                      {user && (
-                        <Text fw={700} size="lg">
-                          {user.firstName} {user.lastName}
+        <Stack gap="md">
+          {navItems.map((item) => (
+            <NavItem
+              key={item.id}
+              icon={item.icon}
+              label={item.label}
+              active={activeSection === item.id}
+              onClick={() => setActiveSection(item.id)}
+            />
+          ))}
+        </Stack>
+      </Paper>
+
+      {/* Main Content */}
+      <div className="flex-1 p-10">
+        <Transition
+          mounted={activeSection === 'personal'}
+          transition="fade"
+          duration={200}
+        >
+          {(styles) => (
+            <Box style={styles}>
+              {activeSection === 'personal' && (
+                <Paper className="bg-[#1A1B1E] p-8 rounded-xl shadow-lg border border-[#2C2E33]">
+                  <Text size="xl" fw={700} mb={rem(4)} className="text-gray-100">
+                    Edit Profile
+                  </Text>
+                  <Text size="sm" c="dimmed" mb={rem(32)}>
+                    Update your personal information and profile picture
                         </Text>
-                      )}
-                    </Group>
-                    {user && <Text size="xs" c="dimmed">{user.email}</Text>}
+                  
+                  {/* Profile Picture */}
+                  <Box mb={rem(40)}>
+                    <ProfilePicture
+                      onImageChange={handleImageChange}
+                      previewUrl={previewUrl}
+                      profilePicture={user?.profilePicture}
+                    />
                   </Box>
                   
-                  <Divider mb="md" />
-                  
-                  <Tabs.Tab value="account" leftSection={<RiUser3Line size={16} />}>
-                    Profile
-                  </Tabs.Tab>
-                  <Tabs.Tab value="security" leftSection={<RiLockLine size={16} />}>
-                    Security
-                  </Tabs.Tab>
-                  <Tabs.Tab value="sessions" leftSection={<RiShieldLine size={16} />}>
-                    Sessions
-                  </Tabs.Tab>
-                  <Tabs.Tab value="preferences" leftSection={<RiSettings3Line size={16} />}>
-                    Preferences
-                  </Tabs.Tab>
-                </Tabs.List>
+                  <Divider my={rem(32)} color="#2C2E33" />
 
-                <Divider orientation="vertical" mx="md" />
-
-                <Tabs.Panel value="account" pt="md" px="md">
-                  <Title order={3} mb="md">Profile Settings</Title>
-                  
-                  {/* Email verification status */}
-                  {user && (
-                    <EmailVerificationStatus 
-                      email={user.email} 
-                      isVerified={user.isVerified || false} 
-                    />
-                  )}
-                  
-                  {/* Profile settings form will go here */}
-                  <Text c="dimmed" mt="lg">Profile settings functionality coming soon...</Text>
-                </Tabs.Panel>
-
-                <Tabs.Panel value="security" pt="md" px="md">
-                  <Title order={3} mb="md">Security Settings</Title>
-                  <AccountSecurity userId={user?.id} />
-                </Tabs.Panel>
-
-                <Tabs.Panel value="sessions" pt="md" px="md">
-                  <SessionsManagement />
-                </Tabs.Panel>
-
-                <Tabs.Panel value="preferences" pt="md" px="md">
-                  <Title order={3} mb="md">Preferences</Title>
-                  {/* Preferences form will go here */}
-                  <Text c="dimmed">Preferences functionality coming soon...</Text>
-                </Tabs.Panel>
-              </Tabs>
+                  {/* Form */}
+                  <form onSubmit={(e) => { e.preventDefault(); handleSave(); }} className="max-w-[400px]">
+                    <Stack gap="lg">
+                      <TextInput
+                        label="First Name"
+                        value={formData.firstName}
+                        onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                        classNames={{
+                          root: 'transition-all duration-200',
+                          label: 'text-gray-200 font-medium mb-1.5 text-sm',
+                          input: `
+                            h-[42px] px-4 text-[15px]
+                            bg-[#25262B] 
+                            border border-[#2C2E33] 
+                            text-gray-100
+                            rounded-lg
+                            transition-all duration-200
+                            focus:border-blue-500 focus:outline-none
+                            hover:border-[#40424A]
+                            placeholder:text-gray-500
+                          `,
+                          wrapper: 'focus-within:translate-y-[-2px] transition-transform duration-200'
+                        }}
+                        placeholder="Enter your first name"
+                      />
+                      <TextInput
+                        label="Last Name"
+                        value={formData.lastName}
+                        onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                        classNames={{
+                          root: 'transition-all duration-200',
+                          label: 'text-gray-200 font-medium mb-1.5 text-sm',
+                          input: `
+                            h-[42px] px-4 text-[15px]
+                            bg-[#25262B] 
+                            border border-[#2C2E33] 
+                            text-gray-100
+                            rounded-lg
+                            transition-all duration-200
+                            focus:border-blue-500 focus:outline-none
+                            hover:border-[#40424A]
+                            placeholder:text-gray-500
+                          `,
+                          wrapper: 'focus-within:translate-y-[-2px] transition-transform duration-200'
+                        }}
+                        placeholder="Enter your last name"
+                      />
+                      <TextInput
+                        label="Email Address"
+                        value={formData.email}
+                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                        classNames={{
+                          root: 'transition-all duration-200',
+                          label: 'text-gray-200 font-medium mb-1.5 text-sm',
+                          input: `
+                            h-[42px] px-4 text-[15px]
+                            bg-[#25262B] 
+                            border border-[#2C2E33] 
+                            text-gray-100
+                            rounded-lg
+                            transition-all duration-200
+                            focus:border-blue-500 focus:outline-none
+                            hover:border-[#40424A]
+                            placeholder:text-gray-500
+                          `,
+                          wrapper: 'focus-within:translate-y-[-2px] transition-transform duration-200'
+                        }}
+                        placeholder="Enter your email address"
+                      />
+                      <Button
+                        type="submit"
+                        color={saveSuccess ? 'green' : 'blue'}
+                        loading={isLoading}
+                        leftSection={saveSuccess ? <RiCheckLine size={20} /> : null}
+                        className={`
+                          w-full mt-6 h-[42px]
+                          font-medium
+                          transition-all duration-200
+                          bg-blue-500 hover:bg-blue-600
+                          disabled:opacity-50 disabled:cursor-not-allowed
+                          ${saveSuccess ? '!bg-green-500 hover:!bg-green-600' : ''}
+                        `}
+                        disabled={isLoading || !formData.firstName || !formData.lastName || !formData.email}
+                      >
+                        {isLoading ? 'Saving...' : saveSuccess ? 'Saved Successfully' : 'Save Changes'}
+                      </Button>
+                    </Stack>
+                  </form>
+                </Paper>
+              )}
+            </Box>
+          )}
+        </Transition>
+        
+        {/* Other sections */}
+        {activeSection !== 'personal' && (
+          <Paper className="bg-[#1A1B1E] p-8 rounded-xl shadow-lg border border-[#2C2E33]">
+            <Text size="xl" fw={700} mb={rem(4)} className="text-gray-100">
+              {navItems.find(item => item.id === activeSection)?.label}
+            </Text>
+            <Text size="sm" c="dimmed">
+              This section is coming soon...
+            </Text>
             </Paper>
-          </div>
         )}
-      </Transition>
-    </Container>
+      </div>
+    </div>
   );
 } 

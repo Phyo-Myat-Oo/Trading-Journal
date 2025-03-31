@@ -7,6 +7,7 @@ import { router } from './router/config.tsx';
 import { ErrorBoundary } from './components/common/feedback/ErrorBoundary';
 import authService from './services/authService';
 import GoogleAuthProvider from './providers/GoogleAuthProvider';
+import { NotificationProvider } from './contexts/NotificationContext';
  
 import './styles/dateSlider.css';
  
@@ -80,11 +81,13 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <MantineProvider theme={theme}>
-          <ToastProvider>
-            <GoogleAuthProvider>
-              <RouterProvider router={router} />
-            </GoogleAuthProvider>
-          </ToastProvider>
+          <NotificationProvider>
+            <ToastProvider>
+              <GoogleAuthProvider>
+                <RouterProvider router={router} />
+              </GoogleAuthProvider>
+            </ToastProvider>
+          </NotificationProvider>
         </MantineProvider>
       </QueryClientProvider>
     </ErrorBoundary>

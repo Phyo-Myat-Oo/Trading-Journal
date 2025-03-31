@@ -1,11 +1,12 @@
 import { User, IUser } from '../models/User';
 import * as tokenService from './tokenService';
 import { Request } from 'express';
+import { splitDisplayName } from '../utils/nameUtils';
 
 interface GoogleProfile {
   id: string;
   displayName: string;
-  name: { familyName: string; givenName: string };
+  name: { familyName?: string; givenName?: string };
   emails: Array<{ value: string; verified: boolean }>;
   photos?: Array<{ value: string }>;
 }
@@ -43,11 +44,27 @@ export const findOrCreateGoogleUser = async (profile: GoogleProfile, _req: Reque
     return user;
   }
   
+  // Handle name fields with proper fallbacks
+  let firstName = profile.name?.givenName;
+  let lastName = profile.name?.familyName;
+  
+  // If either name part is missing, try to split the displayName intelligently
+  if (!firstName || !lastName) {
+    // This utility splits displayName into firstName and lastName components
+    // For example, "Su Khin Lin Khine" becomes firstName="Su", lastName="Khin Lin Khine"
+    // This ensures we don't duplicate the full name in both fields
+    const { firstName: parsedFirst, lastName: parsedLast } = splitDisplayName(profile.displayName);
+    
+    // Only use parsed values if the originals are missing
+    firstName = firstName || parsedFirst;
+    lastName = lastName || parsedLast;
+  }
+  
   // Create a new user with Google profile data
   const newUser = await User.create({
     email,
-    firstName: profile.name.givenName,
-    lastName: profile.name.familyName,
+    firstName,
+    lastName,
     googleId: profile.id,
     profilePicture: profile.photos?.[0]?.value,
     provider: 'google',

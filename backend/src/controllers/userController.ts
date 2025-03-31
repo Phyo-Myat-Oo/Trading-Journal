@@ -13,13 +13,15 @@ import { AdminActivityLog } from '../models/AdminActivityLog';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
+import multer from 'multer';
+import cloudinary from '../config/cloudinary';
 
 // Validation schemas
 const updateUserSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters').optional(),
   lastName: z.string().min(2, 'Last name must be at least 2 characters').optional(),
   email: z.string().email('Invalid email address').optional(),
-  currentPassword: z.string().min(1, 'Current password is required'),
+  currentPassword: z.string().min(1, 'Current password is required').optional(),
   newPassword: z
     .string()
     .min(8, 'Password must be at least 8 characters')
@@ -28,6 +30,22 @@ const updateUserSchema = z.object({
       'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
     )
     .optional(),
+});
+
+// Configure multer for profile picture uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG and PNG are allowed.'));
+    }
+  }
 });
 
 export class UserController extends BaseController<IUser> {
@@ -69,8 +87,20 @@ export class UserController extends BaseController<IUser> {
         throw new AppError('User not found', HttpStatus.NOT_FOUND);
       }
 
-      // Verify current password if trying to update password
+      // Check if email is being updated and if it's already in use
+      if (validatedData.email && validatedData.email !== user.email) {
+        const existingUser = await this.userService.findByEmail(validatedData.email);
+        if (existingUser) {
+          throw new AppError('Email is already in use', HttpStatus.BAD_REQUEST);
+        }
+      }
+
+      // Verify current password only if trying to update password
       if (validatedData.newPassword) {
+        if (!validatedData.currentPassword) {
+          throw new AppError('Current password is required to update password', HttpStatus.BAD_REQUEST);
+        }
+
         const isPasswordValid = await this.userService.validatePassword(user, validatedData.currentPassword);
         if (!isPasswordValid) {
           throw new AppError('Current password is incorrect', HttpStatus.UNAUTHORIZED);
@@ -439,7 +469,8 @@ export class UserController extends BaseController<IUser> {
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
-            role: user.role
+            role: user.role,
+            profilePicture: user.profilePicture || null
           }
         }
       });
@@ -520,6 +551,61 @@ export class UserController extends BaseController<IUser> {
       res.status(HttpStatus.OK).json({
         success: true,
         message: 'Password has been reset successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  updateProfilePicture = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!req.user?.id) {
+        throw new AppError('User not authenticated', HttpStatus.UNAUTHORIZED);
+      }
+
+      if (!req.file) {
+        throw new AppError('No file uploaded', HttpStatus.BAD_REQUEST);
+      }
+
+      const user = await this.userService.findById(req.user.id);
+      if (!user) {
+        throw new AppError('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Delete old profile picture from Cloudinary if exists
+      if (user.profilePicture) {
+        const publicId = user.profilePicture.split('/').pop()?.split('.')[0];
+        if (publicId) {
+          try {
+            await cloudinary.uploader.destroy(`trading-journal/avatars/${publicId}`);
+          } catch (error) {
+            console.error('Error deleting old profile picture:', error);
+          }
+        }
+      }
+
+      // Upload new profile picture to Cloudinary
+      const result = await cloudinary.uploader.upload(
+        `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
+        {
+          folder: 'trading-journal/avatars',
+          resource_type: 'auto',
+          transformation: [
+            { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+            { quality: 'auto' }
+          ]
+        }
+      );
+
+      // Update user profile picture URL
+      user.profilePicture = result.secure_url;
+      await user.save();
+
+      res.status(HttpStatus.OK).json({
+        success: true,
+        data: {
+          profilePicture: user.profilePicture
+        }
       });
     } catch (error) {
       next(error);
